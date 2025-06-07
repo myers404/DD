@@ -1,7 +1,6 @@
-package tests
+package evaluator
 
 import (
-	"DD/evaluator"
 	"DD/parser"
 	"fmt"
 	"math"
@@ -18,7 +17,7 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 	tests := []struct {
 		name        string
 		expression  string
-		variables   evaluator.Context
+		variables   Context
 		expected    interface{}
 		shouldError bool
 		errorType   string
@@ -27,55 +26,55 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Basic Addition",
 			expression: "x + y",
-			variables:  evaluator.Context{"x": 5, "y": 3},
+			variables:  Context{"x": 5, "y": 3},
 			expected:   8.0,
 		},
 		{
 			name:       "Basic Subtraction",
 			expression: "x - y",
-			variables:  evaluator.Context{"x": 10, "y": 4},
+			variables:  Context{"x": 10, "y": 4},
 			expected:   6.0,
 		},
 		{
 			name:       "Basic Multiplication",
 			expression: "x * y",
-			variables:  evaluator.Context{"x": 6, "y": 7},
+			variables:  Context{"x": 6, "y": 7},
 			expected:   42.0,
 		},
 		{
 			name:       "Basic Division",
 			expression: "x / y",
-			variables:  evaluator.Context{"x": 15, "y": 3},
+			variables:  Context{"x": 15, "y": 3},
 			expected:   5.0,
 		},
 		{
 			name:       "Modulo Operation",
 			expression: "x % y",
-			variables:  evaluator.Context{"x": 17, "y": 5},
+			variables:  Context{"x": 17, "y": 5},
 			expected:   2.0,
 		},
 		{
 			name:       "Complex Arithmetic with Precedence",
 			expression: "x + y * z - w / v",
-			variables:  evaluator.Context{"x": 10, "y": 2, "z": 5, "w": 8, "v": 4},
+			variables:  Context{"x": 10, "y": 2, "z": 5, "w": 8, "v": 4},
 			expected:   18.0, // 10 + (2*5) - (8/4) = 10 + 10 - 2 = 18
 		},
 		{
 			name:       "Parentheses Override Precedence",
 			expression: "(x + y) * (z - w)",
-			variables:  evaluator.Context{"x": 3, "y": 2, "z": 8, "w": 3},
+			variables:  Context{"x": 3, "y": 2, "z": 8, "w": 3},
 			expected:   25.0, // (3+2) * (8-3) = 5 * 5 = 25
 		},
 		{
 			name:       "Unary Plus",
 			expression: "+x + +y",
-			variables:  evaluator.Context{"x": 5, "y": -3},
+			variables:  Context{"x": 5, "y": -3},
 			expected:   2.0,
 		},
 		{
 			name:       "Unary Minus",
 			expression: "-x + -y",
-			variables:  evaluator.Context{"x": 5, "y": -3},
+			variables:  Context{"x": 5, "y": -3},
 			expected:   -2.0, // -5 + -(-3) = -5 + 3 = -2
 		},
 
@@ -83,19 +82,19 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Mixed Numeric Types int + float64",
 			expression: "x + y",
-			variables:  evaluator.Context{"x": int(5), "y": 3.5},
+			variables:  Context{"x": int(5), "y": 3.5},
 			expected:   8.5,
 		},
 		{
 			name:       "Mixed Numeric Types int32 * float32",
 			expression: "x * y",
-			variables:  evaluator.Context{"x": int32(4), "y": float32(2.5)},
+			variables:  Context{"x": int32(4), "y": float32(2.5)},
 			expected:   10.0,
 		},
 		{
 			name:       "Mixed Numeric Types uint + int",
 			expression: "x + y",
-			variables:  evaluator.Context{"x": uint(10), "y": int(-3)},
+			variables:  Context{"x": uint(10), "y": int(-3)},
 			expected:   7.0,
 		},
 
@@ -103,31 +102,31 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "MIN Function",
 			expression: "MIN(x, y)",
-			variables:  evaluator.Context{"x": 10, "y": 5},
+			variables:  Context{"x": 10, "y": 5},
 			expected:   5.0,
 		},
 		{
 			name:       "MAX Function",
 			expression: "MAX(x, y)",
-			variables:  evaluator.Context{"x": 10, "y": 15},
+			variables:  Context{"x": 10, "y": 15},
 			expected:   15.0,
 		},
 		{
 			name:       "Nested MIN/MAX",
 			expression: "MIN(MAX(x, y), z)",
-			variables:  evaluator.Context{"x": 5, "y": 10, "z": 7},
+			variables:  Context{"x": 5, "y": 10, "z": 7},
 			expected:   7.0, // MIN(MAX(5,10), 7) = MIN(10, 7) = 7
 		},
 		{
 			name:       "MIN with Infix Syntax",
 			expression: "x MIN y",
-			variables:  evaluator.Context{"x": 10, "y": 5},
+			variables:  Context{"x": 10, "y": 5},
 			expected:   5.0,
 		},
 		{
 			name:       "MAX with Infix Syntax",
 			expression: "x MAX y",
-			variables:  evaluator.Context{"x": 10, "y": 15},
+			variables:  Context{"x": 10, "y": 15},
 			expected:   15.0,
 		},
 
@@ -135,49 +134,49 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Boolean Equality True == True",
 			expression: "x == y",
-			variables:  evaluator.Context{"x": true, "y": true},
+			variables:  Context{"x": true, "y": true},
 			expected:   true,
 		},
 		{
 			name:       "Boolean Equality True == False",
 			expression: "x == y",
-			variables:  evaluator.Context{"x": true, "y": false},
+			variables:  Context{"x": true, "y": false},
 			expected:   false,
 		},
 		{
 			name:       "Boolean Inequality True != False",
 			expression: "x != y",
-			variables:  evaluator.Context{"x": true, "y": false},
+			variables:  Context{"x": true, "y": false},
 			expected:   true,
 		},
 		{
 			name:       "Boolean Inequality False != False",
 			expression: "x != y",
-			variables:  evaluator.Context{"x": false, "y": false},
+			variables:  Context{"x": false, "y": false},
 			expected:   false,
 		},
 		{
 			name:       "Boolean Literals Equality",
 			expression: "true == false",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   false,
 		},
 		{
 			name:       "Boolean Literals Inequality",
 			expression: "true != false",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   true,
 		},
 		{
 			name:       "Complex Boolean Comparison",
 			expression: "(x > 5) == (y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 8},
+			variables:  Context{"x": 6, "y": 8},
 			expected:   true, // (true) == (true) = true
 		},
 		{
 			name:       "Complex Boolean Inequality",
 			expression: "(x > 5) != (y > 10)",
-			variables:  evaluator.Context{"x": 6, "y": 8},
+			variables:  Context{"x": 6, "y": 8},
 			expected:   true, // (true) != (false) = true
 		},
 
@@ -185,43 +184,43 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Greater Than",
 			expression: "x > y",
-			variables:  evaluator.Context{"x": 10, "y": 5},
+			variables:  Context{"x": 10, "y": 5},
 			expected:   true,
 		},
 		{
 			name:       "Greater Than or Equal",
 			expression: "x >= y",
-			variables:  evaluator.Context{"x": 5, "y": 5},
+			variables:  Context{"x": 5, "y": 5},
 			expected:   true,
 		},
 		{
 			name:       "Less Than",
 			expression: "x < y",
-			variables:  evaluator.Context{"x": 3, "y": 8},
+			variables:  Context{"x": 3, "y": 8},
 			expected:   true,
 		},
 		{
 			name:       "Less Than or Equal",
 			expression: "x <= y",
-			variables:  evaluator.Context{"x": 5, "y": 5},
+			variables:  Context{"x": 5, "y": 5},
 			expected:   true,
 		},
 		{
 			name:       "Equality",
 			expression: "x == y",
-			variables:  evaluator.Context{"x": 7, "y": 7},
+			variables:  Context{"x": 7, "y": 7},
 			expected:   true,
 		},
 		{
 			name:       "Inequality",
 			expression: "x != y",
-			variables:  evaluator.Context{"x": 7, "y": 8},
+			variables:  Context{"x": 7, "y": 8},
 			expected:   true,
 		},
 		{
 			name:       "Chained Comparisons (Left Associative)",
 			expression: "(x > y) == (z < w)",
-			variables:  evaluator.Context{"x": 10, "y": 5, "z": 3, "w": 8},
+			variables:  Context{"x": 10, "y": 5, "z": 3, "w": 8},
 			expected:   true, // (10>5) == (3<8) = true == true = true
 		},
 
@@ -229,55 +228,55 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Boolean AND (&&)",
 			expression: "x && y",
-			variables:  evaluator.Context{"x": true, "y": true},
+			variables:  Context{"x": true, "y": true},
 			expected:   true,
 		},
 		{
 			name:       "Boolean AND (AND)",
 			expression: "x AND y",
-			variables:  evaluator.Context{"x": true, "y": false},
+			variables:  Context{"x": true, "y": false},
 			expected:   false,
 		},
 		{
 			name:       "Boolean OR (||)",
 			expression: "x || y",
-			variables:  evaluator.Context{"x": false, "y": true},
+			variables:  Context{"x": false, "y": true},
 			expected:   true,
 		},
 		{
 			name:       "Boolean OR (OR)",
 			expression: "x OR y",
-			variables:  evaluator.Context{"x": false, "y": false},
+			variables:  Context{"x": false, "y": false},
 			expected:   false,
 		},
 		{
 			name:       "Boolean NOT (!)",
 			expression: "!x",
-			variables:  evaluator.Context{"x": true},
+			variables:  Context{"x": true},
 			expected:   false,
 		},
 		{
 			name:       "Boolean NOT (NOT)",
 			expression: "NOT x",
-			variables:  evaluator.Context{"x": false},
+			variables:  Context{"x": false},
 			expected:   true,
 		},
 		{
 			name:       "Complex Boolean Logic",
 			expression: "(x > 5 AND y < 10) OR (z == 0 AND NOT w)",
-			variables:  evaluator.Context{"x": 6, "y": 8, "z": 1, "w": false},
+			variables:  Context{"x": 6, "y": 8, "z": 1, "w": false},
 			expected:   true, // (true AND true) OR (false AND true) = true OR false = true
 		},
 		{
 			name:       "Short Circuit AND",
 			expression: "false AND (x / 0 > 1)", // Should not evaluate x/0
-			variables:  evaluator.Context{"x": 10},
+			variables:  Context{"x": 10},
 			expected:   false,
 		},
 		{
 			name:       "Short Circuit OR",
 			expression: "true OR (x / 0 > 1)", // Should not evaluate x/0
-			variables:  evaluator.Context{"x": 10},
+			variables:  Context{"x": 10},
 			expected:   true,
 		},
 
@@ -285,55 +284,55 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "ABS Function Positive",
 			expression: "ABS(x)",
-			variables:  evaluator.Context{"x": 5},
+			variables:  Context{"x": 5},
 			expected:   5.0,
 		},
 		{
 			name:       "ABS Function Negative",
 			expression: "ABS(x)",
-			variables:  evaluator.Context{"x": -7},
+			variables:  Context{"x": -7},
 			expected:   7.0,
 		},
 		{
 			name:       "NEGATE Function",
 			expression: "NEGATE(x)",
-			variables:  evaluator.Context{"x": 5},
+			variables:  Context{"x": 5},
 			expected:   -5.0,
 		},
 		{
 			name:       "CEIL Function",
 			expression: "CEIL(x)",
-			variables:  evaluator.Context{"x": 3.2},
+			variables:  Context{"x": 3.2},
 			expected:   4.0,
 		},
 		{
 			name:       "FLOOR Function",
 			expression: "FLOOR(x)",
-			variables:  evaluator.Context{"x": 3.8},
+			variables:  Context{"x": 3.8},
 			expected:   3.0,
 		},
 		{
 			name:       "THRESHOLD Function Above",
 			expression: "THRESHOLD(x, 10)",
-			variables:  evaluator.Context{"x": 15},
+			variables:  Context{"x": 15},
 			expected:   true, // Changed from 1.0 to true
 		},
 		{
 			name:       "THRESHOLD Function Below",
 			expression: "THRESHOLD(x, 10)",
-			variables:  evaluator.Context{"x": 5},
+			variables:  Context{"x": 5},
 			expected:   false, // Changed from 0.0 to false
 		},
 		{
 			name:       "THRESHOLD Function Equal",
 			expression: "THRESHOLD(x, 10)",
-			variables:  evaluator.Context{"x": 10},
+			variables:  Context{"x": 10},
 			expected:   true, // Changed from 1.0 to true
 		},
 		{
 			name:       "Nested Mathematical Functions",
 			expression: "ABS(NEGATE(CEIL(x)))",
-			variables:  evaluator.Context{"x": -3.2},
+			variables:  Context{"x": -3.2},
 			expected:   3.0, // ABS(NEGATE(CEIL(-3.2))) = ABS(NEGATE(-3)) = ABS(3) = 3
 		},
 
@@ -341,25 +340,25 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "ITE True Branch",
 			expression: "ITE(x > 5, y + 1, z * 2)",
-			variables:  evaluator.Context{"x": 10, "y": 3, "z": 4},
+			variables:  Context{"x": 10, "y": 3, "z": 4},
 			expected:   4.0, // x > 5 is true, so y + 1 = 3 + 1 = 4
 		},
 		{
 			name:       "ITE False Branch",
 			expression: "ITE(x > 5, y + 1, z * 2)",
-			variables:  evaluator.Context{"x": 2, "y": 3, "z": 4},
+			variables:  Context{"x": 2, "y": 3, "z": 4},
 			expected:   8.0, // x > 5 is false, so z * 2 = 4 * 2 = 8
 		},
 		{
 			name:       "Nested ITE",
 			expression: "ITE(x > 0, ITE(y > 0, x + y, x - y), 0)",
-			variables:  evaluator.Context{"x": 5, "y": 3},
+			variables:  Context{"x": 5, "y": 3},
 			expected:   8.0, // x > 0 true, y > 0 true, so x + y = 5 + 3 = 8
 		},
 		{
 			name:       "ITE with Complex Condition",
 			expression: "ITE((x > 5 AND y < 10), x * y, x + y)",
-			variables:  evaluator.Context{"x": 6, "y": 8},
+			variables:  Context{"x": 6, "y": 8},
 			expected:   48.0, // (6>5 AND 8<10) true, so 6*8 = 48
 		},
 
@@ -367,99 +366,191 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "IMPLIES True -> True",
 			expression: "IMPLIES(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 8},
+			variables:  Context{"x": 6, "y": 8},
 			expected:   true, // true -> true = true
 		},
 		{
 			name:       "IMPLIES True -> False",
 			expression: "IMPLIES(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 12},
+			variables:  Context{"x": 6, "y": 12},
 			expected:   false, // true -> false = false
 		},
 		{
 			name:       "IMPLIES False -> True",
 			expression: "IMPLIES(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 3, "y": 8},
+			variables:  Context{"x": 3, "y": 8},
 			expected:   true, // false -> true = true
 		},
 		{
 			name:       "IMPLIES False -> False",
 			expression: "IMPLIES(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 3, "y": 12},
+			variables:  Context{"x": 3, "y": 12},
 			expected:   true, // false -> false = true
 		},
 		{
 			name:       "EQUIV Both True",
 			expression: "EQUIV(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 8},
+			variables:  Context{"x": 6, "y": 8},
 			expected:   true, // true <-> true = true
 		},
 		{
 			name:       "EQUIV Both False",
 			expression: "EQUIV(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 3, "y": 12},
+			variables:  Context{"x": 3, "y": 12},
 			expected:   true, // false <-> false = true
 		},
 		{
 			name:       "EQUIV Different",
 			expression: "EQUIV(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 12},
+			variables:  Context{"x": 6, "y": 12},
 			expected:   false, // true <-> false = false
 		},
 		{
 			name:       "XOR Both False",
 			expression: "XOR(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 3, "y": 12},
+			variables:  Context{"x": 3, "y": 12},
 			expected:   false, // false XOR false = false
 		},
 		{
 			name:       "XOR Both True",
 			expression: "XOR(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 8},
+			variables:  Context{"x": 6, "y": 8},
 			expected:   false, // true XOR true = false
 		},
 		{
 			name:       "XOR Different",
 			expression: "XOR(x > 5, y < 10)",
-			variables:  evaluator.Context{"x": 6, "y": 12},
+			variables:  Context{"x": 6, "y": 12},
 			expected:   true, // true XOR false = true
+		},
+
+		// ==== INFIX LOGICAL OPERATORS ====
+		{
+			name:       "Infix Implies True -> True",
+			expression: "true -> true",
+			variables:  Context{},
+			expected:   true,
+		},
+		{
+			name:       "Infix Implies True -> False",
+			expression: "true -> false",
+			variables:  Context{},
+			expected:   false,
+		},
+		{
+			name:       "Infix Implies False -> True",
+			expression: "false -> true",
+			variables:  Context{},
+			expected:   true,
+		},
+		{
+			name:       "Infix Implies False -> False",
+			expression: "false -> false",
+			variables:  Context{},
+			expected:   true,
+		},
+		{
+			name:       "Infix Equiv Both True",
+			expression: "true <-> true",
+			variables:  Context{},
+			expected:   true,
+		},
+		{
+			name:       "Infix Equiv Both False",
+			expression: "false <-> false",
+			variables:  Context{},
+			expected:   true,
+		},
+		{
+			name:       "Infix Equiv Different",
+			expression: "true <-> false",
+			variables:  Context{},
+			expected:   false,
+		},
+		{
+			name:       "Complex Infix Logic with Parentheses",
+			expression: "(x > 5 -> y < 10) && (a <-> b)",
+			variables:  Context{"x": 6, "y": 8, "a": true, "b": true},
+			expected:   true,
+		},
+		{
+			name:       "Mixed Function and Infix Styles",
+			expression: "IMPLIES(x > 0, y > 0) && (z <-> w)",
+			variables:  Context{"x": 5, "y": 3, "z": true, "w": true},
+			expected:   true,
+		},
+		{
+			name:       "Infix Implies with Variables",
+			expression: "x > 5 -> y < 10",
+			variables:  Context{"x": 6, "y": 8},
+			expected:   true,
+		},
+		{
+			name:       "Infix Equiv with Variables",
+			expression: "x > 5 <-> y < 10",
+			variables:  Context{"x": 6, "y": 8},
+			expected:   true,
+		},
+		{
+			name:       "Precedence Implies with AND",
+			expression: "x > 0 && y > 0 -> z > 0",
+			variables:  Context{"x": 1, "y": 1, "z": 1},
+			expected:   true,
+		},
+		{
+			name:       "Precedence Equiv with OR",
+			expression: "x > 0 || y > 0 <-> z > 0",
+			variables:  Context{"x": 1, "y": 0, "z": 1},
+			expected:   true,
+		},
+		{
+			name:       "Parenthesized Chaining Implies",
+			expression: "(x -> y) -> z",
+			variables:  Context{"x": false, "y": true, "z": true},
+			expected:   true,
+		},
+		{
+			name:       "Parenthesized Chaining Equiv",
+			expression: "(x <-> y) <-> z",
+			variables:  Context{"x": true, "y": true, "z": true},
+			expected:   true,
 		},
 
 		// ==== LITERALS ====
 		{
 			name:       "Integer Literal",
 			expression: "42",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   42.0,
 		},
 		{
 			name:       "Float Literal",
 			expression: "3.14159",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   3.14159,
 		},
 		{
 			name:       "Boolean True Literal",
 			expression: "true",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   true,
 		},
 		{
 			name:       "Boolean False Literal",
 			expression: "false",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   false,
 		},
 		{
 			name:       "Boolean TRUE Literal",
 			expression: "TRUE",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   true,
 		},
 		{
 			name:       "Boolean FALSE Literal",
 			expression: "FALSE",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   false,
 		},
 
@@ -467,25 +558,25 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Arithmetic Precedence",
 			expression: "2 + 3 * 4",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   14.0, // 2 + (3*4) = 2 + 12 = 14
 		},
 		{
 			name:       "Comparison vs Arithmetic",
 			expression: "2 + 3 > 4",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   true, // (2+3) > 4 = 5 > 4 = true
 		},
 		{
 			name:       "Boolean vs Comparison",
 			expression: "2 > 1 AND 3 < 4",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   true, // (2>1) AND (3<4) = true AND true = true
 		},
 		{
 			name:       "Complex Precedence",
 			expression: "2 + 3 * 4 > 10 AND 5 < 6 OR false",
-			variables:  evaluator.Context{},
+			variables:  Context{},
 			expected:   true, // ((2+(3*4)) > 10) AND (5<6) OR false = (14>10) AND true OR false = true AND true OR false = true
 		},
 
@@ -493,63 +584,63 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:        "Division by Zero",
 			expression:  "x / 0",
-			variables:   evaluator.Context{"x": 10},
+			variables:   Context{"x": 10},
 			shouldError: true,
 			errorType:   "runtime",
 		},
 		{
 			name:        "Modulo by Zero",
 			expression:  "x % 0",
-			variables:   evaluator.Context{"x": 10},
+			variables:   Context{"x": 10},
 			shouldError: true,
 			errorType:   "runtime",
 		},
 		{
 			name:        "Type Mismatch in Arithmetic",
 			expression:  "x + y",
-			variables:   evaluator.Context{"x": 10, "y": true},
+			variables:   Context{"x": 10, "y": true},
 			shouldError: true,
 			errorType:   "type",
 		},
 		{
 			name:        "Type Mismatch in Comparison",
 			expression:  "x > y",
-			variables:   evaluator.Context{"x": 10, "y": "hello"},
+			variables:   Context{"x": 10, "y": "hello"},
 			shouldError: true,
 			errorType:   "type",
 		},
 		{
 			name:        "Boolean Ordering Comparison Invalid",
 			expression:  "x > y",
-			variables:   evaluator.Context{"x": true, "y": false},
+			variables:   Context{"x": true, "y": false},
 			shouldError: true,
 			errorType:   "type",
 		},
 		{
 			name:        "Mixed Type Equality Invalid",
 			expression:  "x == y",
-			variables:   evaluator.Context{"x": 10, "y": true},
+			variables:   Context{"x": 10, "y": true},
 			shouldError: true,
 			errorType:   "type",
 		},
 		{
 			name:        "Type Mismatch in Boolean Logic",
 			expression:  "x AND y",
-			variables:   evaluator.Context{"x": 10, "y": true},
+			variables:   Context{"x": 10, "y": true},
 			shouldError: true,
 			errorType:   "type",
 		},
 		{
 			name:        "Undefined Variable",
 			expression:  "x + undefined_var",
-			variables:   evaluator.Context{"x": 10},
+			variables:   Context{"x": 10},
 			shouldError: true,
 			errorType:   "variable",
 		},
 		{
 			name:        "Invalid Function Call",
 			expression:  "ABS(x, y)", // ABS takes one argument
-			variables:   evaluator.Context{"x": 10, "y": 5},
+			variables:   Context{"x": 10, "y": 5},
 			shouldError: true,
 			errorType:   "syntax",
 		},
@@ -558,25 +649,25 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Very Large Numbers",
 			expression: "x + y",
-			variables:  evaluator.Context{"x": 1e10, "y": 2e10},
+			variables:  Context{"x": 1e10, "y": 2e10},
 			expected:   3e10,
 		},
 		{
 			name:       "Very Small Numbers",
 			expression: "x + y",
-			variables:  evaluator.Context{"x": 1e-10, "y": 2e-10},
+			variables:  Context{"x": 1e-10, "y": 2e-10},
 			expected:   3e-10,
 		},
 		{
 			name:       "Zero Values",
 			expression: "x * y + z",
-			variables:  evaluator.Context{"x": 0, "y": 100, "z": 5},
+			variables:  Context{"x": 0, "y": 100, "z": 5},
 			expected:   5.0,
 		},
 		{
 			name:       "Negative Zero",
 			expression: "x + y",
-			variables:  evaluator.Context{"x": 0.0, "y": -0.0},
+			variables:  Context{"x": 0.0, "y": -0.0},
 			expected:   0.0,
 		},
 
@@ -584,25 +675,25 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Temperature Conversion Formula",
 			expression: "ITE(unit == 1, (temp * 9 / 5) + 32, temp)", // C to F conversion
-			variables:  evaluator.Context{"unit": 1, "temp": 25},
+			variables:  Context{"unit": 1, "temp": 25},
 			expected:   77.0, // (25*9/5) + 32 = 45 + 32 = 77
 		},
 		{
 			name:       "Financial Calculation",
 			expression: "ITE(balance > 1000, balance * 0.02, ITE(balance > 100, balance * 0.01, 0))",
-			variables:  evaluator.Context{"balance": 1500},
+			variables:  Context{"balance": 1500},
 			expected:   30.0, // 1500 * 0.02 = 30
 		},
 		{
 			name:       "Complex Decision Logic",
 			expression: "((age >= 18 AND age <= 65) AND (income > 30000 OR hasGuarantor)) AND NOT hasBadCredit",
-			variables:  evaluator.Context{"age": 25, "income": 35000, "hasGuarantor": false, "hasBadCredit": false},
+			variables:  Context{"age": 25, "income": 35000, "hasGuarantor": false, "hasBadCredit": false},
 			expected:   true,
 		},
 		{
 			name:       "Scientific Formula",
 			expression: "ABS(CEIL(velocity * time + 0.5 * acceleration * time * time))",
-			variables:  evaluator.Context{"velocity": 10, "time": 3, "acceleration": 9.8},
+			variables:  Context{"velocity": 10, "time": 3, "acceleration": 9.8},
 			expected:   75.0, // ABS(CEIL(10*3 + 0.5*9.8*3*3)) = ABS(CEIL(30 + 44.1)) = ABS(CEIL(74.1)) = ABS(75) = 75
 		},
 
@@ -610,13 +701,13 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 		{
 			name:       "Single Variable",
 			expression: "x",
-			variables:  evaluator.Context{"x": 42},
+			variables:  Context{"x": 42},
 			expected:   42.0,
 		},
 		{
 			name:       "Multiple Variables",
 			expression: "x + y + z",
-			variables:  evaluator.Context{"x": 1, "y": 2, "z": 3},
+			variables:  Context{"x": 1, "y": 2, "z": 3},
 			expected:   6.0,
 		},
 	}
@@ -639,7 +730,7 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 			if tt.shouldError && err == nil {
 				// We expected an error but got none from parsing
 				// Try evaluation to see if it errors there
-				_, evalErr := evaluator.Evaluate(expr, tt.variables)
+				_, evalErr := Evaluate(expr, tt.variables)
 				if evalErr == nil {
 					t.Errorf("Expected error but got none")
 				}
@@ -647,7 +738,7 @@ func TestComprehensiveLanguageFeatures(t *testing.T) {
 			}
 
 			// Evaluate the expression
-			result, err := evaluator.Evaluate(expr, tt.variables)
+			result, err := Evaluate(expr, tt.variables)
 
 			if tt.shouldError {
 				if err == nil {
@@ -756,6 +847,17 @@ func TestParseErrors(t *testing.T) {
 			expression:  "x @ y",
 			expectError: "Unexpected character",
 		},
+		// NEW: Chained operator error tests
+		{
+			name:        "Chained Implies Error",
+			expression:  "p -> q -> r",
+			expectError: "Chained '->' operators require explicit parentheses",
+		},
+		{
+			name:        "Chained Equiv Error",
+			expression:  "p <-> q <-> r",
+			expectError: "Chained '<->' operators require explicit parentheses",
+		},
 	}
 
 	for _, tt := range errorCases {
@@ -768,6 +870,215 @@ func TestParseErrors(t *testing.T) {
 
 			if !strings.Contains(err.Error(), tt.expectError) {
 				t.Errorf("Expected error containing '%s', got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+// TestInfixLogicalOperators tests the new -> and <-> operators specifically
+func TestInfixLogicalOperators(t *testing.T) {
+	tests := []struct {
+		name        string
+		expression  string
+		variables   Context
+		expected    interface{}
+		shouldError bool
+		errorType   string
+	}{
+		// Basic functionality tests
+		{
+			name:       "Simple Implies",
+			expression: "x > 5 -> y < 10",
+			variables:  Context{"x": 6, "y": 8},
+			expected:   true,
+		},
+		{
+			name:       "Simple Equiv",
+			expression: "x > 5 <-> y < 10",
+			variables:  Context{"x": 6, "y": 8},
+			expected:   true,
+		},
+		{
+			name:       "Implies False Antecedent",
+			expression: "x > 10 -> y < 5",
+			variables:  Context{"x": 3, "y": 8},
+			expected:   true, // false -> anything = true
+		},
+		{
+			name:       "Equiv Different Values",
+			expression: "x > 5 <-> y > 10",
+			variables:  Context{"x": 6, "y": 8},
+			expected:   false, // true <-> false = false
+		},
+
+		// Precedence tests
+		{
+			name:       "Implies with AND",
+			expression: "x > 0 && y > 0 -> z > 0",
+			variables:  Context{"x": 1, "y": 1, "z": 1},
+			expected:   true,
+		},
+		{
+			name:       "Equiv with OR",
+			expression: "x > 0 || y > 0 <-> z > 0",
+			variables:  Context{"x": 1, "y": 0, "z": 1},
+			expected:   true,
+		},
+		{
+			name:       "Complex Precedence",
+			expression: "x > 0 && y > 0 -> z > 0 || w > 0",
+			variables:  Context{"x": 1, "y": 1, "z": 0, "w": 1},
+			expected:   true,
+		},
+
+		// Parenthesized chaining tests
+		{
+			name:       "Parenthesized Chaining Implies",
+			expression: "(x -> y) -> z",
+			variables:  Context{"x": false, "y": true, "z": true},
+			expected:   true,
+		},
+		{
+			name:       "Parenthesized Chaining Equiv",
+			expression: "(x <-> y) <-> z",
+			variables:  Context{"x": true, "y": true, "z": true},
+			expected:   true,
+		},
+		{
+			name:       "Right Associative Parentheses",
+			expression: "x -> (y -> z)",
+			variables:  Context{"x": true, "y": false, "z": true},
+			expected:   true, // true -> (false -> true) = true -> true = true
+		},
+
+		// Mixed with function style
+		{
+			name:       "Mixed Function and Infix",
+			expression: "IMPLIES(x > 0, y > 0) && (z <-> w)",
+			variables:  Context{"x": 5, "y": 3, "z": true, "w": true},
+			expected:   true,
+		},
+
+		// Error cases - chained operators
+		{
+			name:        "Chained Implies",
+			expression:  "x -> y -> z",
+			variables:   Context{"x": true, "y": true, "z": true},
+			shouldError: true,
+			errorType:   "syntax",
+		},
+		{
+			name:        "Chained Equiv",
+			expression:  "x <-> y <-> z",
+			variables:   Context{"x": true, "y": true, "z": true},
+			shouldError: true,
+			errorType:   "syntax",
+		},
+		{
+			name:        "Mixed Chained Operators",
+			expression:  "x -> y <-> z",
+			variables:   Context{"x": true, "y": true, "z": true},
+			shouldError: true,
+			errorType:   "syntax",
+		},
+
+		// Type error cases
+		{
+			name:        "Implies Type Error Left",
+			expression:  "5 -> true",
+			variables:   Context{},
+			shouldError: true,
+			errorType:   "type",
+		},
+		{
+			name:        "Implies Type Error Right",
+			expression:  "true -> 5",
+			variables:   Context{},
+			shouldError: true,
+			errorType:   "type",
+		},
+		{
+			name:        "Equiv Type Error Left",
+			expression:  "5 <-> true",
+			variables:   Context{},
+			shouldError: true,
+			errorType:   "type",
+		},
+		{
+			name:        "Equiv Type Error Right",
+			expression:  "true <-> 5",
+			variables:   Context{},
+			shouldError: true,
+			errorType:   "type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := parser.ParseExpression(tt.expression)
+
+			if tt.shouldError && err != nil {
+				// Expected parse error
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected parse error: %v", err)
+				return
+			}
+
+			if tt.shouldError && err == nil {
+				// We expected an error but got none from parsing
+				_, evalErr := Evaluate(expr, tt.variables)
+				if evalErr == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			// Evaluate the expression
+			result, err := Evaluate(expr, tt.variables)
+
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected evaluation error: %v", err)
+				return
+			}
+
+			// Compare results
+			if !compareParsedValues(result, tt.expected) {
+				t.Errorf("Expected %v (%T), got %v (%T)", tt.expected, tt.expected, result, result)
+			}
+		})
+	}
+}
+
+// TestValidParenthesizedExpressions tests that valid parenthesized expressions work
+func TestValidParenthesizedExpressions(t *testing.T) {
+	validCases := []string{
+		"p -> q",
+		"p <-> q",
+		"(p -> q) -> r",
+		"p -> (q -> r)",
+		"(p <-> q) <-> r",
+		"p <-> (q <-> r)",
+		"(p -> q) && (r -> s)",
+		"p -> (q && r)",
+		"(p || q) -> r",
+		"(p && q) <-> (r || s)",
+	}
+
+	for _, expr := range validCases {
+		t.Run(expr, func(t *testing.T) {
+			_, err := parser.ParseExpression(expr)
+			if err != nil {
+				t.Errorf("Expected valid expression but got error: %v", err)
 			}
 		})
 	}
@@ -808,6 +1119,22 @@ func TestVariableCollection(t *testing.T) {
 		{
 			name:       "Nested Functions",
 			expression: "ABS(x) + MIN(y, MAX(z, w))",
+			expected:   []string{"x", "y", "z", "w"},
+		},
+		// NEW: Test infix logical operators
+		{
+			name:       "Infix Implies",
+			expression: "x -> y",
+			expected:   []string{"x", "y"},
+		},
+		{
+			name:       "Infix Equiv",
+			expression: "x <-> y",
+			expected:   []string{"x", "y"},
+		},
+		{
+			name:       "Complex with Infix",
+			expression: "(x > 0 -> y < 10) && (z <-> w)",
 			expected:   []string{"x", "y", "z", "w"},
 		},
 	}
@@ -856,19 +1183,19 @@ func TestEvaluationErrors(t *testing.T) {
 	errorCases := []struct {
 		name        string
 		expression  string
-		variables   evaluator.Context
+		variables   Context
 		expectError string
 	}{
 		{
 			name:        "Boolean Ordering Error",
 			expression:  "true > false",
-			variables:   evaluator.Context{},
+			variables:   Context{},
 			expectError: "Ordering operators",
 		},
 		{
 			name:        "Mixed Type Equality Error",
 			expression:  "5 == true",
-			variables:   evaluator.Context{},
+			variables:   Context{},
 			expectError: "Cannot compare",
 		},
 	}
@@ -885,7 +1212,7 @@ func TestEvaluationErrors(t *testing.T) {
 				return
 			}
 
-			_, err = evaluator.Evaluate(expr, tt.variables)
+			_, err = Evaluate(expr, tt.variables)
 			if err == nil {
 				t.Errorf("Expected evaluation error containing '%s' but got none", tt.expectError)
 				return
@@ -925,6 +1252,9 @@ func TestPropertyBased(t *testing.T) {
 			"ITE(x, y, z)",
 			"ABS(x) + NEGATE(y)",
 			"IMPLIES(x > 0, y < 10)",
+			"x -> y",        // NEW
+			"x <-> y",       // NEW
+			"(x -> y) -> z", // NEW
 		}
 
 		for _, expr := range validExprs {
@@ -937,9 +1267,9 @@ func TestPropertyBased(t *testing.T) {
 
 			if err1 == nil {
 				// Both succeeded - should produce equivalent results
-				vars := evaluator.Context{"x": 5, "y": 3, "z": 1}
-				result1, _ := evaluator.Evaluate(expr1, vars)
-				result2, _ := evaluator.Evaluate(expr2, vars)
+				vars := Context{"x": 5, "y": 3, "z": 1}
+				result1, _ := Evaluate(expr1, vars)
+				result2, _ := Evaluate(expr2, vars)
 
 				if !compareParsedValues(result1, result2) {
 					t.Errorf("Deterministic parsing failed for %s: %v != %v", expr, result1, result2)
@@ -962,9 +1292,11 @@ func TestPerformance(t *testing.T) {
 		"x > 5 AND y < 10 OR z == 0",
 		"ITE(x > 0, y + z, w * v)",
 		"((x + y) * 2 > 10 AND z != 0) OR (MIN(a, b) >= 5 AND THRESHOLD(c + d, 5))",
+		"x -> y -> z",   // Should error quickly
+		"x <-> y <-> z", // Should error quickly
 	}
 
-	variables := evaluator.Context{
+	variables := Context{
 		"x": 5, "y": 3, "z": 0, "w": 2, "v": 4,
 		"a": 10, "b": 8, "c": 15, "d": 5,
 	}
@@ -976,7 +1308,8 @@ func TestPerformance(t *testing.T) {
 
 			for i := 0; i < iterations; i++ {
 				_, err := parser.ParseExpression(expr)
-				if err != nil {
+				// Don't fail on expected parse errors for chained operators
+				if err != nil && !strings.Contains(expr, "->") {
 					t.Errorf("Parse error: %v", err)
 					return
 				}
@@ -993,7 +1326,7 @@ func TestPerformance(t *testing.T) {
 		t.Run(fmt.Sprintf("Evaluate_%s", expr), func(t *testing.T) {
 			expr, err := parser.ParseExpression(expr)
 			if err != nil {
-				t.Errorf("Parse error: %v", err)
+				// Skip evaluation test for invalid expressions
 				return
 			}
 
@@ -1001,7 +1334,7 @@ func TestPerformance(t *testing.T) {
 			iterations := 10000
 
 			for i := 0; i < iterations; i++ {
-				_, err := evaluator.Evaluate(expr, variables)
+				_, err := Evaluate(expr, variables)
 				if err != nil {
 					t.Errorf("Evaluation error: %v", err)
 					return
@@ -1021,7 +1354,7 @@ func TestPerformance(t *testing.T) {
 // TestMemoryUsage checks for memory leaks
 func TestMemoryUsage(t *testing.T) {
 	expression := "x + y * z - ITE(w > 0, a + b, c * d)"
-	variables := evaluator.Context{
+	variables := Context{
 		"x": 1, "y": 2, "z": 3, "w": 4, "a": 5, "b": 6, "c": 7, "d": 8,
 	}
 
@@ -1034,7 +1367,7 @@ func TestMemoryUsage(t *testing.T) {
 			continue
 		}
 
-		_, err = evaluator.Evaluate(expr, variables)
+		_, err = Evaluate(expr, variables)
 		if err != nil {
 			t.Errorf("Evaluation error at iteration %d: %v", i, err)
 		}
@@ -1049,7 +1382,7 @@ func TestMemoryUsage(t *testing.T) {
 // TestConcurrency ensures thread safety
 func TestConcurrency(t *testing.T) {
 	expression := "x + y * z"
-	variables := evaluator.Context{"x": 1, "y": 2, "z": 3}
+	variables := Context{"x": 1, "y": 2, "z": 3}
 	expected := 7.0
 
 	// Parse once
@@ -1069,7 +1402,7 @@ func TestConcurrency(t *testing.T) {
 			defer func() { done <- true }()
 
 			for i := 0; i < iterations; i++ {
-				result, err := evaluator.Evaluate(expr, variables)
+				result, err := Evaluate(expr, variables)
 				if err != nil {
 					t.Errorf("Concurrent evaluation error: %v", err)
 					return
@@ -1122,7 +1455,7 @@ func TestErrorFormatting(t *testing.T) {
 			}
 
 			// Try evaluation
-			_, err = evaluator.Evaluate(expr, evaluator.Context{"x": 10})
+			_, err = Evaluate(expr, Context{"x": 10})
 			if err != nil {
 				formatted := parser.FormatError(err)
 				for _, contains := range tt.contains {
@@ -1161,6 +1494,32 @@ func TestValidateExpression(t *testing.T) {
 			name:       "Invalid Function",
 			expression: "UNKNOWN(x)",
 			valid:      false,
+		},
+		// NEW: Test infix logical operators
+		{
+			name:       "Valid Infix Implies",
+			expression: "x -> y",
+			valid:      true,
+		},
+		{
+			name:       "Valid Infix Equiv",
+			expression: "x <-> y",
+			valid:      true,
+		},
+		{
+			name:       "Invalid Chained Implies",
+			expression: "x -> y -> z",
+			valid:      false,
+		},
+		{
+			name:       "Invalid Chained Equiv",
+			expression: "x <-> y <-> z",
+			valid:      false,
+		},
+		{
+			name:       "Valid Parenthesized Chaining",
+			expression: "(x -> y) -> z",
+			valid:      true,
 		},
 	}
 
@@ -1221,13 +1580,26 @@ func BenchmarkParseComplex(b *testing.B) {
 	}
 }
 
-func BenchmarkEvaluateSimple(b *testing.B) {
-	expr, _ := parser.ParseExpression("x + y")
-	variables := evaluator.Context{"x": 5, "y": 3}
+// NEW: Benchmark infix logical operators
+func BenchmarkParseInfixLogical(b *testing.B) {
+	expression := "(x > 0 -> y > 0) && (a <-> b)"
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := evaluator.Evaluate(expr, variables)
+		_, err := parser.ParseExpression(expression)
+		if err != nil {
+			b.Errorf("Parse error: %v", err)
+		}
+	}
+}
+
+func BenchmarkEvaluateSimple(b *testing.B) {
+	expr, _ := parser.ParseExpression("x + y")
+	variables := Context{"x": 5, "y": 3}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := Evaluate(expr, variables)
 		if err != nil {
 			b.Errorf("Evaluation error: %v", err)
 		}
@@ -1236,13 +1608,27 @@ func BenchmarkEvaluateSimple(b *testing.B) {
 
 func BenchmarkEvaluateComplex(b *testing.B) {
 	expr, _ := parser.ParseExpression("((x + y) * 2 > 10 AND z != 0) OR (MIN(a, b) >= 5 AND THRESHOLD(c + d, 5))")
-	variables := evaluator.Context{
+	variables := Context{
 		"x": 5, "y": 3, "z": 1, "a": 10, "b": 8, "c": 15, "d": 5,
 	}
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := evaluator.Evaluate(expr, variables)
+		_, err := Evaluate(expr, variables)
+		if err != nil {
+			b.Errorf("Evaluation error: %v", err)
+		}
+	}
+}
+
+// NEW: Benchmark infix logical evaluation
+func BenchmarkEvaluateInfixLogical(b *testing.B) {
+	expr, _ := parser.ParseExpression("(x > 0 -> y > 0) && (a <-> b)")
+	variables := Context{"x": 5, "y": 3, "a": true, "b": true}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := Evaluate(expr, variables)
 		if err != nil {
 			b.Errorf("Evaluation error: %v", err)
 		}

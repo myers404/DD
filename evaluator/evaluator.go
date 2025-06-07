@@ -316,9 +316,9 @@ func (e *Evaluator) applyBinaryOperation(node *parser.BinaryOperation, leftVal, 
 		switch node.Operator {
 		case parser.TOKEN_XOR:
 			return leftBool != rightBool, nil
-		case parser.TOKEN_IMPLIES:
+		case parser.TOKEN_IMPLIES, parser.TOKEN_IMPLIES_OP:
 			return !leftBool || rightBool, nil
-		case parser.TOKEN_EQUIV:
+		case parser.TOKEN_EQUIV, parser.TOKEN_EQUIV_OP:
 			return leftBool == rightBool, nil
 		}
 	}
@@ -418,7 +418,7 @@ func (e *Evaluator) applyFunction(node *parser.FunctionCall, args []interface{})
 		}
 		return args[2], nil
 
-	case parser.TOKEN_IMPLIES:
+	case parser.TOKEN_IMPLIES, parser.TOKEN_IMPLIES_OP:
 		left, ok1 := ToBool(args[0])
 		right, ok2 := ToBool(args[1])
 		if !ok1 {
@@ -429,7 +429,7 @@ func (e *Evaluator) applyFunction(node *parser.FunctionCall, args []interface{})
 		}
 		return !left || right, nil
 
-	case parser.TOKEN_EQUIV:
+	case parser.TOKEN_EQUIV, parser.TOKEN_EQUIV_OP:
 		left, ok1 := ToBool(args[0])
 		right, ok2 := ToBool(args[1])
 		if !ok1 {
@@ -503,7 +503,7 @@ func (e *Evaluator) isComparisonOp(op parser.TokenType) bool {
 
 func (e *Evaluator) isLogicalOp(op parser.TokenType) bool {
 	switch op {
-	case parser.TOKEN_XOR, parser.TOKEN_IMPLIES, parser.TOKEN_EQUIV:
+	case parser.TOKEN_XOR, parser.TOKEN_IMPLIES, parser.TOKEN_EQUIV, parser.TOKEN_IMPLIES_OP, parser.TOKEN_EQUIV_OP:
 		return true
 	default:
 		return false

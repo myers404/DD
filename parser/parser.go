@@ -159,7 +159,12 @@ func (l *Lexer) NextToken() (Token, error) {
 		l.advance()
 		return l.makeToken(TOKEN_PLUS, "+"), nil
 	case '-':
+		// NEW: Check for ->
 		l.advance()
+		if l.peek() == '>' {
+			l.advance()
+			return l.makeToken(TOKEN_IMPLIES_OP, "->"), nil
+		}
 		return l.makeToken(TOKEN_MINUS, "-"), nil
 	case '*':
 		l.advance()
@@ -185,7 +190,12 @@ func (l *Lexer) NextToken() (Token, error) {
 	switch ch {
 	case '<':
 		l.advance()
-		if l.peek() == '=' {
+		if l.peek() == '-' && l.peekNext() == '>' {
+			// NEW: Handle <->
+			l.advance() // consume '-'
+			l.advance() // consume '>'
+			return l.makeToken(TOKEN_EQUIV_OP, "<->"), nil
+		} else if l.peek() == '=' {
 			l.advance()
 			return l.makeToken(TOKEN_LE, "<="), nil
 		}
@@ -357,9 +367,9 @@ func (p *Parser) parseExpression() (Expression, error) {
 	return p.parseLogicalOr()
 }
 
-// logical_or = logical_and { ("OR" | "||") logical_and }
+// logical_or = logical_logical { ("OR" | "||") logical_logical }
 func (p *Parser) parseLogicalOr() (Expression, error) {
-	left, err := p.parseLogicalAnd()
+	left, err := p.parseLogicalLogical() // CHANGED: was parseLogicalImplies()
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +381,7 @@ func (p *Parser) parseLogicalOr() (Expression, error) {
 			return nil, err
 		}
 
-		right, err := p.parseLogicalAnd()
+		right, err := p.parseLogicalLogical() // CHANGED: was parseLogicalImplies()
 		if err != nil {
 			return nil, err
 		}
@@ -382,6 +392,65 @@ func (p *Parser) parseLogicalOr() (Expression, error) {
 			Right:    right,
 			Range:    SourceRange{Start: left.GetRange().Start, End: right.GetRange().End},
 		}
+	}
+
+	return left, nil
+}
+
+// NEW: logical_logical handles both -> and <-> at the same precedence level
+func (p *Parser) parseLogicalLogical() (Expression, error) {
+	left, err := p.parseLogicalAnd()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for logical operators (-> or <->)
+	if p.match(TOKEN_IMPLIES_OP, TOKEN_EQUIV_OP) {
+		operator := p.currentToken.Type
+		err := p.advance()
+		if err != nil {
+			return nil, err
+		}
+
+		right, err := p.parseLogicalAnd()
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if there's another logical operator after this (error if found)
+		if p.match(TOKEN_IMPLIES_OP, TOKEN_EQUIV_OP) {
+			nextOp := p.currentToken.Type
+			if nextOp == operator {
+				// Same operator chained
+				opName := "->"
+				if operator == TOKEN_EQUIV_OP {
+					opName = "<->"
+				}
+				return nil, &ParseError{
+					Message:    fmt.Sprintf("Chained '%s' operators require explicit parentheses", opName),
+					Range:      p.currentToken.Range,
+					SourceText: p.sourceText,
+					ErrorType:  "syntax",
+					Suggestion: fmt.Sprintf("Use parentheses: (a %s b) %s c or a %s (b %s c)", opName, opName, opName, opName),
+				}
+			} else {
+				// Different operators mixed
+				return nil, &ParseError{
+					Message:    "Mixed logical operators require explicit parentheses",
+					Range:      p.currentToken.Range,
+					SourceText: p.sourceText,
+					ErrorType:  "syntax",
+					Suggestion: "Use parentheses to clarify precedence: (a -> b) <-> c or a -> (b <-> c)",
+				}
+			}
+		}
+
+		return &BinaryOperation{
+			Left:     left,
+			Operator: operator,
+			Right:    right,
+			Range:    SourceRange{Start: left.GetRange().Start, End: right.GetRange().End},
+		}, nil
 	}
 
 	return left, nil

@@ -316,9 +316,9 @@ func (c *MTBDDCompiler) VisitBinaryOperation(node *parser.BinaryOperation) (inte
 		result = mtbdd.OR(leftRef, rightRef)
 	case parser.TOKEN_XOR:
 		result = mtbdd.XOR(leftRef, rightRef)
-	case parser.TOKEN_IMPLIES:
+	case parser.TOKEN_IMPLIES, parser.TOKEN_IMPLIES_OP:
 		result = mtbdd.IMPLIES(leftRef, rightRef)
-	case parser.TOKEN_EQUIV:
+	case parser.TOKEN_EQUIV, parser.TOKEN_EQUIV_OP:
 		result = mtbdd.EQUIV(leftRef, rightRef)
 	default:
 		return NullRef, c.context.WrapError(fmt.Errorf("unsupported binary operator: %s", node.Operator), node)
@@ -498,7 +498,7 @@ func (c *MTBDDCompiler) VisitFunctionCall(node *parser.FunctionCall) (interface{
 		c.context.SetCached(node, result)
 		return result, nil
 
-	case parser.TOKEN_IMPLIES:
+	case parser.TOKEN_IMPLIES, parser.TOKEN_IMPLIES_OP:
 		if len(node.Args) != 2 {
 			return NullRef, c.context.WrapError(fmt.Errorf("IMPLIES requires exactly 2 arguments"), node)
 		}
@@ -525,7 +525,7 @@ func (c *MTBDDCompiler) VisitFunctionCall(node *parser.FunctionCall) (interface{
 		c.context.SetCached(node, result)
 		return result, nil
 
-	case parser.TOKEN_EQUIV:
+	case parser.TOKEN_EQUIV, parser.TOKEN_EQUIV_OP:
 		if len(node.Args) != 2 {
 			return NullRef, c.context.WrapError(fmt.Errorf("EQUIV requires exactly 2 arguments"), node)
 		}
@@ -632,7 +632,7 @@ func (c *MTBDDCompiler) VisitFunctionCall(node *parser.FunctionCall) (interface{
 		result := mtbdd.Max(arg1Ref, arg2Ref)
 		c.context.SetCached(node, result)
 		return result, nil
-		
+
 	default:
 		return NullRef, c.context.WrapError(fmt.Errorf("unsupported function: %s", node.Function), node)
 	}

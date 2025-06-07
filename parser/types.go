@@ -123,6 +123,10 @@ const (
 	TOKEN_OR  // OR, ||
 	TOKEN_NOT // NOT, !
 
+	// Infix logical operators
+	TOKEN_IMPLIES_OP // ->
+	TOKEN_EQUIV_OP   // <->
+
 	// Delimiters
 	TOKEN_LPAREN // (
 	TOKEN_RPAREN // )
@@ -164,6 +168,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_AND:        "AND",
 	TOKEN_OR:         "OR",
 	TOKEN_NOT:        "NOT",
+	TOKEN_IMPLIES_OP: "->",
+	TOKEN_EQUIV_OP:   "<->",
 	TOKEN_LPAREN:     "(",
 	TOKEN_RPAREN:     ")",
 	TOKEN_COMMA:      ",",
