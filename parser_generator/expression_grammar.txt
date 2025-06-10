@@ -1,0 +1,111 @@
+// Enhanced Expression Language Grammar - Simplified for Parser Generator
+// Supports comprehensive expression parsing with advanced operators and functions
+
+%name "Enhanced Expression Language"
+%start expression
+
+// ===== TOKEN DEFINITIONS =====
+
+// Basic literals - simplified patterns
+%token NUMBER    /\d+/
+%token DECIMAL   /\d+\.\d+/
+%token TRUE      "true"
+%token FALSE     "false"
+%token IDENTIFIER /[a-zA-Z][a-zA-Z0-9_]*/
+
+// Arithmetic operators
+%token PLUS      "+"
+%token MINUS     "-"
+%token MULTIPLY  "*"
+%token DIVIDE    "/"
+%token MODULO    "%"
+
+// Comparison operators
+%token EQ        "=="
+%token NE        "!="
+%token LT        "<"
+%token LE        "<="
+%token GT        ">"
+%token GE        ">="
+
+// Logical operators
+%token AND       "&&"
+%token OR        "||"
+%token NOT       "!"
+
+// Advanced logical operators
+%token IMPLIES_OP "->"
+%token EQUIV_OP   "<->"
+
+// Delimiters
+%token LPAREN    "("
+%token RPAREN    ")"
+%token COMMA     ","
+
+// Math functions
+%token MIN       "MIN"
+%token MAX       "MAX"
+%token ABS       "ABS"
+%token NEGATE    "NEGATE"
+%token CEIL      "CEIL"
+%token FLOOR     "FLOOR"
+
+// Logic functions
+%token THRESHOLD "THRESHOLD"
+%token ITE       "ITE"
+%token IMPLIES   "IMPLIES"
+%token EQUIV     "EQUIV"
+%token XOR       "XOR"
+
+// Skip whitespace
+%token WHITESPACE /\s+/ skip
+
+// ===== GRAMMAR RULES =====
+
+// Main expression entry point
+expression -> logical_or
+
+// Logical OR (lowest precedence)
+logical_or -> logical_implies (OR logical_implies)*
+
+// Logical implications and equivalence
+logical_implies -> logical_and | logical_and IMPLIES_OP logical_and | logical_and EQUIV_OP logical_and
+
+// Logical AND
+logical_and -> comparison (AND comparison)*
+
+// Comparison operators
+comparison -> arithmetic | arithmetic EQ arithmetic | arithmetic NE arithmetic | arithmetic LT arithmetic | arithmetic LE arithmetic | arithmetic GT arithmetic | arithmetic GE arithmetic
+
+// Arithmetic addition/subtraction
+arithmetic -> term (PLUS term | MINUS term)*
+
+// Multiplicative operations
+term -> factor (MULTIPLY factor | DIVIDE factor | MODULO factor)*
+
+// Unary operators and primary expressions
+factor -> MINUS factor | PLUS factor | NOT factor | primary
+
+// Primary expressions
+primary -> number_literal
+  | boolean_literal
+  | IDENTIFIER
+  | LPAREN expression RPAREN
+  | function_call
+
+// Literals
+number_literal -> NUMBER | DECIMAL
+boolean_literal -> TRUE | FALSE
+
+// Function calls
+function_call -> ABS LPAREN expression RPAREN
+  | NEGATE LPAREN expression RPAREN
+  | CEIL LPAREN expression RPAREN
+  | FLOOR LPAREN expression RPAREN
+  | MIN LPAREN expression COMMA expression RPAREN
+  | MAX LPAREN expression COMMA expression RPAREN
+  | THRESHOLD LPAREN expression COMMA expression RPAREN
+  | IMPLIES LPAREN expression COMMA expression RPAREN
+  | EQUIV LPAREN expression COMMA expression RPAREN
+  | XOR LPAREN expression COMMA expression RPAREN
+  | ITE LPAREN expression COMMA expression COMMA expression RPAREN

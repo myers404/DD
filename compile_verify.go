@@ -9,7 +9,7 @@ import (
 // This file demonstrates that all MTBDD components compile and work together
 // Run with: go run compile_verify.go
 
-func main() {
+func TestMain() {
 	fmt.Println("=== MTBDD Library Compilation Verification ===")
 
 	// Test 1: Basic MTBDD creation

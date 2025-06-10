@@ -3,7 +3,7 @@
 package evaluator
 
 import (
-	"DD/parser" // Replace with your actual module path
+	"DD/parser"
 	"fmt"
 	"math"
 )

@@ -37,7 +37,7 @@ type GroupDef struct {
 	ID              string                 `json:"id"`
 	Name            string                 `json:"name"`
 	Description     string                 `json:"description"`
-	Type            string                 `json:"type"` // single_select, multi_select, quantity
+	Type            GroupType              `json:"type"` // single_select, multi_select, quantity
 	IsRequired      bool                   `json:"is_required"`
 	MinSelections   int                    `json:"min_selections"`
 	MaxSelections   int                    `json:"max_selections"`
@@ -46,6 +46,8 @@ type GroupDef struct {
 	Attributes      map[string]interface{} `json:"attributes"`
 	Metadata        map[string]interface{} `json:"metadata"`
 	IsActive        bool                   `json:"is_active"`
+	IsCollapsible   bool                   `json:"is_collapsible"`
+	DefaultState    string                 `json:"default_state,omitempty"`
 }
 
 // OptionDef defines an individual configurable option
@@ -66,22 +68,32 @@ type OptionDef struct {
 	Attributes   map[string]interface{} `json:"attributes"`
 	Metadata     map[string]interface{} `json:"metadata"`
 	IsActive     bool                   `json:"is_active"`
+	ParentID     string                 `json:"parent_id,omitempty"`
+	PriceType    PriceType              `json:"price_type"`
+	PriceFormula string                 `json:"price_formula,omitempty"`
+	StepQuantity int                    `json:"step_quantity"`
+	IsRequired   bool                   `json:"is_required"`
+	IsHidden     bool                   `json:"is_hidden"`
 }
 
 // RuleDef defines business rules and constraints
 type RuleDef struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Type        RuleType               `json:"type"`
-	Expression  string                 `json:"expression"`
-	Priority    int                    `json:"priority"`
-	IsActive    bool                   `json:"is_active"`
-	ErrorMsg    string                 `json:"error_msg,omitempty"`
-	WarningMsg  string                 `json:"warning_msg,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Type         RuleType               `json:"type"`
+	Expression   string                 `json:"expression"`
+	Priority     int                    `json:"priority"`
+	IsActive     bool                   `json:"is_active"`
+	ErrorMsg     string                 `json:"error_msg,omitempty"`
+	WarningMsg   string                 `json:"warning_msg,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Tags         []string               `json:"tags,omitempty"`
+	Condition    ConditionDef           `json:"condition"`
+	Action       ActionDef              `json:"action"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
 }
 
 // PricingRuleDef defines pricing rules and discounts
@@ -104,6 +116,10 @@ type PricingRuleDef struct {
 	Metadata          map[string]interface{} `json:"metadata"`
 	CreatedAt         time.Time              `json:"created_at"`
 	UpdatedAt         time.Time              `json:"updated_at"`
+	Conditions        []ConditionDef         `json:"conditions"`
+	PricingAction     PricingActionDef       `json:"pricing_action"`
+	CustomerSegments  []string               `json:"customer_segments,omitempty"`
+	ValidUntil        *time.Time             `json:"valid_until,omitempty"`
 }
 
 // BundleDef defines product bundles with special pricing
@@ -183,14 +199,18 @@ type Customer struct {
 
 // ConfigUpdate represents the result of a configuration change
 type ConfigUpdate struct {
-	IsValid          bool                   `json:"is_valid"`
-	UpdatedOptions   []Option               `json:"updated_options"`
-	ValidationResult *ValidationResult      `json:"validation_result,omitempty"`
-	PriceBreakdown   *PriceBreakdown        `json:"price_breakdown,omitempty"`
-	Suggestions      []ResolutionSuggestion `json:"suggestions,omitempty"`
-	Timestamp        time.Time              `json:"timestamp"`
-	UpdateType       string                 `json:"update_type,omitempty"` // add, remove, modify
-	PerformanceInfo  *PerformanceInfo       `json:"performance_info,omitempty"`
+	IsValid           bool                   `json:"is_valid"`
+	UpdatedOptions    []Option               `json:"updated_options"`
+	ValidationResult  *ValidationResult      `json:"validation_result,omitempty"`
+	PriceBreakdown    *PriceBreakdown        `json:"price_breakdown,omitempty"`
+	Suggestions       []ResolutionSuggestion `json:"suggestions,omitempty"`
+	Timestamp         time.Time              `json:"timestamp"`
+	UpdateType        string                 `json:"update_type,omitempty"` // add, remove, modify
+	PerformanceInfo   *PerformanceInfo       `json:"performance_info,omitempty"`
+	UpdatedSelections []Selection            `json:"updated_selections"`
+	AddedOptions      []string               `json:"added_options"`
+	RemovedOptions    []string               `json:"removed_options"`
+	PriceImpact       *PriceImpact           `json:"price_impact,omitempty"`
 }
 
 // Option represents an option with current availability and selection state
@@ -425,6 +445,9 @@ const (
 	ConditionalRule   RuleType = "conditional"
 	ValidationRule    RuleType = "validation"
 	BusinessLogicRule RuleType = "business_logic"
+	CompatibilityRule RuleType = "compatibility"
+	DependencyRule    RuleType = "dependency"
+	PricingRule       RuleType = "pricing"
 )
 
 // PricingRuleType defines types of pricing rules

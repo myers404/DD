@@ -1,0 +1,239 @@
+// Sample Grammar - Advanced Expression Language
+// Demonstrates comprehensive parser generator features
+
+%name "Advanced Expression Language"
+%start program
+
+// ===== TOKEN DEFINITIONS =====
+
+// Literals
+%token NUMBER      /\d+(\.\d+)?([eE][+-]?\d+)?/
+%token STRING      /"([^"\\]|\\.)*"/
+%token BOOLEAN     /(true|false)/
+%token IDENTIFIER  /[a-zA-Z][a-zA-Z0-9_]*/
+
+// Arithmetic Operators  
+%token PLUS        "+"
+%token MINUS       "-"
+%token MULTIPLY    "*"
+%token DIVIDE      "/"
+%token MODULO      "%"
+%token POWER       "**"
+
+// Comparison Operators
+%token EQ          "=="
+%token NE          "!="
+%token LT          "<"
+%token LE          "<="
+%token GT          ">"
+%token GE          ">="
+
+// Logical Operators
+%token AND         "&&"
+%token OR          "||"
+%token NOT         "!"
+
+// Assignment
+%token ASSIGN      "="
+
+// Delimiters
+%token LPAREN      "("
+%token RPAREN      ")"
+%token LBRACE      "{"
+%token RBRACE      "}"
+%token LBRACKET    "["
+%token RBRACKET    "]"
+%token COMMA       ","
+%token SEMICOLON   ";"
+%token DOT         "."
+
+// Keywords
+%token IF          "if"
+%token ELSE        "else"
+%token WHILE       "while"
+%token FOR         "for"
+%token FUNCTION    "function"
+%token RETURN      "return"
+%token VAR         "var"
+%token CONST       "const"
+
+// Special
+%token NEWLINE     /\r?\n/
+%token WHITESPACE  /[ \t]+/ skip
+%token COMMENT     /\/\/.*/ skip
+%token BLOCK_COMMENT /\/\*[\s\S]*?\*\// skip
+
+// ===== GRAMMAR RULES =====
+
+// Program structure
+program -> statement_list
+
+statement_list -> statement*
+
+statement -> 
+    declaration_stmt
+  | assignment_stmt  
+  | expression_stmt
+  | if_stmt
+  | while_stmt
+  | function_def
+  | return_stmt
+  | NEWLINE
+
+// Declarations
+declaration_stmt -> 
+    VAR IDENTIFIER (ASSIGN expression)? SEMICOLON
+  | CONST IDENTIFIER ASSIGN expression SEMICOLON
+
+// Assignment
+assignment_stmt -> IDENTIFIER ASSIGN expression SEMICOLON
+
+// Expression statement
+expression_stmt -> expression SEMICOLON
+
+// Control flow
+if_stmt -> IF LPAREN expression RPAREN block (ELSE block)?
+
+while_stmt -> WHILE LPAREN expression RPAREN block
+
+return_stmt -> RETURN expression? SEMICOLON
+
+// Function definition
+function_def -> FUNCTION IDENTIFIER LPAREN parameter_list? RPAREN block
+
+parameter_list -> IDENTIFIER (COMMA IDENTIFIER)*
+
+// Block
+block -> LBRACE statement_list RBRACE
+
+// Expressions (with precedence)
+expression -> logical_or
+
+logical_or -> logical_and (OR logical_and)*
+
+logical_and -> equality (AND equality)*
+
+equality -> comparison ((EQ | NE) comparison)*
+
+comparison -> addition ((LT | LE | GT | GE) addition)*
+
+addition -> multiplication ((PLUS | MINUS) multiplication)*
+
+multiplication -> power ((MULTIPLY | DIVIDE | MODULO) power)*
+
+power -> unary (POWER unary)*
+
+unary -> 
+    NOT unary
+  | MINUS unary  
+  | PLUS unary
+  | postfix
+
+postfix -> 
+    primary (DOT IDENTIFIER | LBRACKET expression RBRACKET | LPAREN argument_list? RPAREN)*
+
+primary ->
+    NUMBER
+  | STRING  
+  | BOOLEAN
+  | IDENTIFIER
+  | LPAREN expression RPAREN
+  | array_literal
+  | object_literal
+
+// Literals
+array_literal -> LBRACKET (expression (COMMA expression)*)? RBRACKET
+
+object_literal -> LBRACE (object_property (COMMA object_property)*)? RBRACE
+
+object_property -> IDENTIFIER ":" expression
+
+// Function calls
+argument_list -> expression (COMMA expression)*
+
+// ===== SAMPLE EXPRESSIONS =====
+
+// This grammar supports expressions like:
+//
+// Simple arithmetic:
+// x + y * 2
+// (a + b) / (c - d)  
+// 2 ** 3 ** 4   // Right associative power
+//
+// Logical expressions:
+// x > 5 && y < 10
+// !flag || (status == "ready")
+//
+// Function calls:
+// sqrt(x * x + y * y)
+// max(a, b, c)
+//
+// Object access:
+// obj.property
+// array[index]
+// func(x, y).result
+//
+// Control structures:
+// if (condition) { 
+//     return value; 
+// } else {
+//     return default;
+// }
+//
+// while (i < 10) {
+//     i = i + 1;
+// }
+//
+// function factorial(n) {
+//     if (n <= 1) {
+//         return 1;
+//     } else {
+//         return n * factorial(n - 1);
+//     }
+// }
+//
+// Complex expressions:
+// var result = calculate(data.values[0], func(x) { return x * 2; });
+// const matrix = [[1, 2], [3, 4]];
+// obj.method(a + b, c || d).property[index]
+
+// ===== AST NODE TYPES =====
+
+// The generated parser will create these AST node types:
+// - Program: Root node containing all statements
+// - Declaration: Variable/constant declarations  
+// - Assignment: Assignment statements
+// - IfStatement: Conditional statements
+// - WhileStatement: Loop statements
+// - FunctionDefinition: Function declarations
+// - ReturnStatement: Return statements
+// - BinaryExpression: Binary operations (+, -, *, etc.)
+// - UnaryExpression: Unary operations (!, -, +)
+// - CallExpression: Function calls
+// - MemberExpression: Property access (obj.prop, obj[key])
+// - Literal: Number, string, boolean literals
+// - Identifier: Variable references
+// - ArrayExpression: Array literals [1, 2, 3]
+// - ObjectExpression: Object literals {key: value}
+
+// ===== OPERATOR PRECEDENCE =====
+
+// Precedence levels (highest to lowest):
+// 1. Postfix: function calls, member access
+// 2. Unary: !, -, + (prefix)
+// 3. Power: ** (right associative)
+// 4. Multiplicative: *, /, %
+// 5. Additive: +, -  
+// 6. Comparison: <, <=, >, >=
+// 7. Equality: ==, !=
+// 8. Logical AND: &&
+// 9. Logical OR: ||
+// 10. Assignment: = (right associative)
+
+// ===== ERROR HANDLING =====
+
+// The generated parser provides:
+// - Detailed error messages with line/column positions
+// - Suggestions for common syntax errors
+// - Recovery mechanisms for continued parsing
+// - Validation of operator precedence and associativity
