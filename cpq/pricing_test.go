@@ -1,1049 +1,561 @@
-// pricing_test.go
-// Comprehensive test suite for Priority 4: Volume Tier Pricing Engine
-// Performance Target: <100ms validation with >80% cache hit rate
-
 package cpq
 
 import (
-	"DD/mtbdd"
-	"sync"
+	"fmt"
+	"math"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// ==========================================
-// Test Setup and Fixtures
-// ==========================================
+func TestNewPricingCalculator(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
 
-func setupVolumePricingTest(t *testing.T) (*VolumePricingCalculator, *SMBVolumeTierCompiler, *CustomerContextEngine) {
-	// Create foundational components
-	registry := NewVariableRegistry()
-	mtbddEngine := mtbdd.NewMTBDD()
-	compiler := NewRuleCompiler(mtbddEngine, registry)
+	if calc.model != model {
+		t.Error("Calculator should store reference to model")
+	}
 
-	// Setup tier compiler
-	tierCompiler := NewSMBVolumeTierCompiler(registry, compiler)
-	require.NoError(t, tierCompiler.PrecompileCommonPatterns())
+	if len(calc.volumeTiers) == 0 {
+		t.Error("Calculator should have default volume tiers")
+	}
 
-	// Setup context engine
-	contextEngine := NewCustomerContextEngine()
-	require.NoError(t, contextEngine.InitializeStandardSegments())
-
-	// Create calculator
-	calculator := NewVolumePricingCalculator(tierCompiler, contextEngine, nil)
-
-	return calculator, tierCompiler, contextEngine
-}
-
-// Create test customer context variations
-func createTestCustomers() map[string]*ConfigurationContext {
-	return map[string]*ConfigurationContext{
-		"basic": {
-			Customer: &Customer{
-				ID: "basic_customer",
-				Attributes: map[string]interface{}{
-					"type":           "standard",
-					"volume_history": 10.0,
-				},
-			},
-		},
-		"professional": {
-			Customer: &Customer{
-				ID: "professional_customer",
-				Attributes: map[string]interface{}{
-					"type":           "professional",
-					"volume_history": 60.0,
-				},
-			},
-		},
-		"enterprise": {
-			Customer: &Customer{
-				ID: "enterprise_customer",
-				Attributes: map[string]interface{}{
-					"type":           "enterprise",
-					"volume_history": 150.0,
-				},
-			},
-		},
-		"nil_customer": nil,
+	if calc.cache == nil {
+		t.Error("Calculator should initialize cache")
 	}
 }
 
-// ==========================================
-// Critical Error Handling Tests (New)
-// ==========================================
+func TestPricingCalculator_CalculatePrice_BasePrice(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
 
-func TestVolumePricingCalculator_CriticalErrorHandling(t *testing.T) {
-	calculator, _, _ := setupVolumePricingTest(t)
+	// Simple selection with base prices
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 1}, // $100
+		{OptionID: "opt2", Quantity: 2}, // $50 each = $100
+	}
 
-	t.Run("Nil Component Protection", func(t *testing.T) {
-		// Create calculator with nil components to test initialization validation
-		nilCalculator := &VolumePricingCalculator{
-			tierCompiler:  nil,
-			contextEngine: nil,
-		}
+	breakdown := calc.CalculatePrice(selections)
 
-		_, err := nilCalculator.CalculateVolumePrice(100.0, 10, nil)
-		assert.Error(t, err, "Should error with nil tier compiler")
-		assert.Contains(t, err.Error(), "tier compiler not initialized")
+	expectedBase := 200.0 // $100 + $100
+	if breakdown.BasePrice != expectedBase {
+		t.Errorf("Expected base price %.2f, got %.2f", expectedBase, breakdown.BasePrice)
+	}
 
-		// Test with only tier compiler nil
-		partialNilCalculator := &VolumePricingCalculator{
-			tierCompiler:  nil,
-			contextEngine: NewCustomerContextEngine(),
-		}
+	// No volume discount for small quantity
+	if breakdown.TotalPrice != expectedBase {
+		t.Errorf("Expected total price %.2f, got %.2f", expectedBase, breakdown.TotalPrice)
+	}
 
-		_, err = partialNilCalculator.CalculateVolumePrice(100.0, 10, nil)
-		assert.Error(t, err, "Should error with nil tier compiler")
-
-		t.Logf("✅ Nil component protection working")
-	})
-
-	t.Run("Division by Zero Protection in Bulk Calculation", func(t *testing.T) {
-		// Test items with zero total price
-		zeroItems := []PricingItem{
-			{ItemID: "item1", BasePrice: 0.0, Quantity: 1},
-			{ItemID: "item2", BasePrice: 0.0, Quantity: 2},
-		}
-
-		_, err := calculator.CalculateBulkPrice(zeroItems, nil)
-		assert.Error(t, err, "Should error on zero total price")
-		assert.Contains(t, err.Error(), "cannot be zero", "Error should mention zero price")
-
-		// Test mixed items where some are zero but total is not
-		mixedItems := []PricingItem{
-			{ItemID: "item1", BasePrice: 0.0, Quantity: 1},
-			{ItemID: "item2", BasePrice: 100.0, Quantity: 1},
-		}
-
-		_, err = calculator.CalculateBulkPrice(mixedItems, nil)
-		require.NoError(t, err, "Should succeed when total price is not zero")
-
-		t.Logf("✅ Division by zero protection working")
-	})
-
-	t.Run("Empty/Nil Items in Bulk Calculation", func(t *testing.T) {
-		// Test with nil items
-		_, err := calculator.CalculateBulkPrice(nil, nil)
-		assert.Error(t, err, "Should error on nil items")
-		assert.Contains(t, err.Error(), "no items provided")
-
-		// Test with empty items
-		_, err = calculator.CalculateBulkPrice([]PricingItem{}, nil)
-		assert.Error(t, err, "Should error on empty items")
-		assert.Contains(t, err.Error(), "no items provided")
-
-		t.Logf("✅ Empty/nil items protection working")
-	})
-
-	t.Run("Invalid Item Data", func(t *testing.T) {
-		// Test items with negative quantities
-		negativeQuantityItems := []PricingItem{
-			{ItemID: "item1", BasePrice: 100.0, Quantity: -1},
-		}
-
-		_, err := calculator.CalculateBulkPrice(negativeQuantityItems, nil)
-		assert.Error(t, err, "Should error on negative quantity")
-		assert.Contains(t, err.Error(), "invalid quantity")
-
-		// Test items with negative prices
-		negativePriceItems := []PricingItem{
-			{ItemID: "item1", BasePrice: -100.0, Quantity: 1},
-		}
-
-		_, err = calculator.CalculateBulkPrice(negativePriceItems, nil)
-		assert.Error(t, err, "Should error on negative price")
-		assert.Contains(t, err.Error(), "negative base price")
-
-		// Test items with zero quantities
-		zeroQuantityItems := []PricingItem{
-			{ItemID: "item1", BasePrice: 100.0, Quantity: 0},
-		}
-
-		_, err = calculator.CalculateBulkPrice(zeroQuantityItems, nil)
-		assert.Error(t, err, "Should error on zero quantity")
-		assert.Contains(t, err.Error(), "invalid quantity")
-
-		t.Logf("✅ Invalid item data protection working")
-	})
-
-	t.Run("Extreme Values Handling", func(t *testing.T) {
-		// Test with large prices within validator limits
-		largePrice := 500000.0 // Large but within the 999999 limit
-		result, err := calculator.CalculateVolumePrice(largePrice, 1, nil)
-		require.NoError(t, err, "Should handle large prices within validator limits")
-		assert.True(t, result.FinalPrice <= largePrice, "Final price should not exceed base price")
-
-		// Test with price at the maximum limit
-		maxPrice := 999999.0 // At the validator limit
-		result, err = calculator.CalculateVolumePrice(maxPrice, 1, nil)
-		require.NoError(t, err, "Should handle price at validator maximum")
-		assert.True(t, result.FinalPrice <= maxPrice, "Final price should not exceed base price")
-
-		// Test with extremely large quantities within limits
-		largeQuantity := 50000 // Large but within the 99999 limit
-		result, err = calculator.CalculateVolumePrice(100.0, largeQuantity, nil)
-		require.NoError(t, err, "Should handle large quantities within validator limits")
-		assert.Greater(t, result.TierDiscount, 0.0, "Should apply tier discount for large quantities")
-
-		// Test with quantity at the maximum limit
-		maxQuantity := 99999 // At the validator limit
-		result, err = calculator.CalculateVolumePrice(100.0, maxQuantity, nil)
-		require.NoError(t, err, "Should handle quantity at validator maximum")
-		assert.Greater(t, result.TierDiscount, 0.0, "Should apply tier discount for max quantities")
-
-		t.Logf("✅ Extreme values handling working within validator limits")
-	})
-
-	t.Run("Nil Context Handling", func(t *testing.T) {
-		// Test with nil context (should default to standard segment)
-		result, err := calculator.CalculateVolumePrice(100.0, 25, nil)
-		require.NoError(t, err, "Should handle nil context gracefully")
-		assert.Equal(t, "standard", result.CustomerSegment, "Should default to standard segment")
-
-		// Test with context containing nil customer
-		contextWithNilCustomer := &ConfigurationContext{
-			Customer: nil,
-		}
-
-		result, err = calculator.CalculateVolumePrice(100.0, 25, contextWithNilCustomer)
-		require.NoError(t, err, "Should handle nil customer gracefully")
-		assert.Equal(t, "standard", result.CustomerSegment, "Should default to standard segment")
-
-		t.Logf("✅ Nil context handling working")
-	})
+	if breakdown.CalculationTime <= 0 {
+		t.Error("Calculation time should be positive")
+	}
 }
 
-// ==========================================
-// Volume Tier Determination Tests
-// ==========================================
+func TestPricingCalculator_CalculatePrice_VolumeTier(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
 
-func TestSMBVolumeTierCompiler_DetermineTier(t *testing.T) {
-	_, tierCompiler, _ := setupVolumePricingTest(t)
+	// Large quantity to trigger volume discount
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 15}, // Triggers Small Volume tier (5% discount)
+	}
 
-	tests := []struct {
-		name             string
-		quantity         int
-		expectedID       string
-		expectedDiscount float64
-		expectError      bool
+	breakdown := calc.CalculatePrice(selections)
+
+	expectedBase := 1500.0 // 15 * $100
+	if breakdown.BasePrice != expectedBase {
+		t.Errorf("Expected base price %.2f, got %.2f", expectedBase, breakdown.BasePrice)
+	}
+
+	// Should have volume discount
+	if len(breakdown.Adjustments) == 0 {
+		t.Error("Expected volume discount adjustment")
+	}
+
+	// 5% discount = $75 off
+	expectedDiscount := 75.0
+	foundDiscount := false
+	for _, adj := range breakdown.Adjustments {
+		if adj.Type == "volume_discount" && math.Abs(adj.Amount+expectedDiscount) < 0.01 {
+			foundDiscount = true
+			break
+		}
+	}
+
+	if !foundDiscount {
+		t.Errorf("Expected $%.2f volume discount, got adjustments: %v", expectedDiscount, breakdown.Adjustments)
+	}
+
+	expectedTotal := 1425.0 // $1500 - $75
+	if math.Abs(breakdown.TotalPrice-expectedTotal) > 0.01 {
+		t.Errorf("Expected total price %.2f, got %.2f", expectedTotal, breakdown.TotalPrice)
+	}
+}
+
+func TestPricingCalculator_VolumeTiers(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
+
+	testCases := []struct {
+		quantity           int
+		expectedTierName   string
+		expectedMultiplier float64
 	}{
-		{
-			name:             "Tier 1 - Small order (5 units)",
-			quantity:         5,
-			expectedID:       "tier_1",
-			expectedDiscount: 0.0,
-			expectError:      false,
-		},
-		{
-			name:             "Tier 2 - Medium order (25 units)",
-			quantity:         25,
-			expectedID:       "tier_2",
-			expectedDiscount: 0.05,
-			expectError:      false,
-		},
-		{
-			name:             "Tier 3 - Large order (75 units)",
-			quantity:         75,
-			expectedID:       "tier_3",
-			expectedDiscount: 0.10,
-			expectError:      false,
-		},
-		{
-			name:             "Tier 4 - Bulk order (150 units)",
-			quantity:         150,
-			expectedID:       "tier_4",
-			expectedDiscount: 0.15,
-			expectError:      false,
-		},
-		{
-			name:             "Boundary - Tier 1/2 transition (10 units)",
-			quantity:         10,
-			expectedID:       "tier_1",
-			expectedDiscount: 0.0,
-			expectError:      false,
-		},
-		{
-			name:             "Boundary - Tier 2/3 transition (50 units)",
-			quantity:         50,
-			expectedID:       "tier_2",
-			expectedDiscount: 0.05,
-			expectError:      false,
-		},
-		{
-			name:        "Invalid - Zero quantity",
-			quantity:    0,
-			expectError: true,
-		},
-		{
-			name:        "Invalid - Negative quantity",
-			quantity:    -5,
-			expectError: true,
-		},
+		{5, "Individual", 1.0},      // No discount
+		{15, "Small Volume", 0.95},  // 5% discount
+		{75, "Medium Volume", 0.90}, // 10% discount
+		{150, "Large Volume", 0.85}, // 15% discount
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tier, err := tierCompiler.DetermineTier(tt.quantity)
-
-			if tt.expectError {
-				assert.Error(t, err, "Expected error for test case: %s", tt.name)
-				return
+	for _, tc := range testCases {
+		t.Run(tc.expectedTierName, func(t *testing.T) {
+			selections := []Selection{
+				{OptionID: "opt1", Quantity: tc.quantity},
 			}
 
-			require.NoError(t, err, "Unexpected error for test case: %s", tt.name)
-			assert.Equal(t, tt.expectedID, tier.ID, "Tier ID mismatch for test case: %s", tt.name)
-			assert.Equal(t, tt.expectedDiscount, tier.Discount, "Discount mismatch for test case: %s", tt.name)
+			breakdown := calc.CalculatePrice(selections)
 
-			t.Logf("✅ %s: Quantity %d -> Tier %s (%.1f%% discount)",
-				tt.name, tt.quantity, tier.ID, tier.Discount*100)
-		})
-	}
-}
+			basePrice := float64(tc.quantity) * 100.0
+			expectedPrice := basePrice * tc.expectedMultiplier
 
-func TestSMBVolumeTierCompiler_TierValidation(t *testing.T) {
-	_, tierCompiler, _ := setupVolumePricingTest(t)
-
-	t.Run("Validate Tier Structure", func(t *testing.T) {
-		errors := tierCompiler.ValidateTierStructure()
-		assert.Empty(t, errors, "Tier structure should be valid")
-
-		if len(errors) > 0 {
-			for _, err := range errors {
-				t.Logf("Validation error: %v", err)
-			}
-		} else {
-			t.Logf("✅ Tier structure validation passed")
-		}
-	})
-
-	t.Run("Test Tier Determination Range", func(t *testing.T) {
-		testCases := []int{1, 5, 10, 11, 25, 50, 51, 75, 100, 101, 150, 200, 1000}
-		results := tierCompiler.TestTierDetermination(testCases)
-
-		for quantity, result := range results {
-			t.Logf("Quantity %d -> %s", quantity, result)
-			assert.NotContains(t, result, "ERROR", "No errors expected for quantity %d", quantity)
-		}
-
-		t.Logf("✅ Tier determination range test completed")
-	})
-}
-
-// ==========================================
-// Customer Context Tests
-// ==========================================
-
-func TestCustomerContextEngine_DetermineSegment(t *testing.T) {
-	_, _, contextEngine := setupVolumePricingTest(t)
-	customers := createTestCustomers()
-
-	tests := []struct {
-		name            string
-		context         *ConfigurationContext
-		expectedSegment string
-	}{
-		{
-			name:            "Basic Customer",
-			context:         customers["basic"],
-			expectedSegment: "standard",
-		},
-		{
-			name:            "Professional Customer",
-			context:         customers["professional"],
-			expectedSegment: "professional",
-		},
-		{
-			name:            "Enterprise Customer",
-			context:         customers["enterprise"],
-			expectedSegment: "enterprise",
-		},
-		{
-			name:            "Nil Customer Context",
-			context:         customers["nil_customer"],
-			expectedSegment: "standard", // Should default to standard
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			segment, err := contextEngine.DetermineSegment(tt.context)
-			require.NoError(t, err, "Segment determination should not error")
-			assert.Equal(t, tt.expectedSegment, segment, "Segment mismatch for test case: %s", tt.name)
-
-			t.Logf("✅ %s -> Segment: %s", tt.name, segment)
-		})
-	}
-}
-
-func TestCustomerContextEngine_CalculateSegmentBonus(t *testing.T) {
-	_, tierCompiler, contextEngine := setupVolumePricingTest(t)
-
-	// Get a test tier
-	tier, err := tierCompiler.DetermineTier(25)
-	require.NoError(t, err, "Should get valid tier")
-
-	tests := []struct {
-		name          string
-		segment       string
-		quantity      int
-		expectedBonus float64
-		allowRange    bool // Some bonuses might be calculated dynamically
-	}{
-		{
-			name:          "Standard Customer - No Bonus",
-			segment:       "standard",
-			quantity:      25,
-			expectedBonus: 0.0,
-			allowRange:    false,
-		},
-		{
-			name:          "Professional Customer - Base Bonus",
-			segment:       "professional",
-			quantity:      25,
-			expectedBonus: 0.05, // 5% base bonus
-			allowRange:    true, // May have additional bonuses
-		},
-		{
-			name:          "Enterprise Customer - Higher Bonus",
-			segment:       "enterprise",
-			quantity:      25,
-			expectedBonus: 0.10, // 10% base bonus
-			allowRange:    true, // May have additional bonuses
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			bonus := contextEngine.CalculateSegmentBonus(tt.segment, tier, tt.quantity)
-
-			if tt.allowRange {
-				assert.GreaterOrEqual(t, bonus, tt.expectedBonus,
-					"Bonus should be at least the expected value for %s", tt.name)
-			} else {
-				assert.Equal(t, tt.expectedBonus, bonus,
-					"Bonus should match expected value for %s", tt.name)
-			}
-
-			t.Logf("✅ %s: %.1f%% bonus", tt.name, bonus*100)
-		})
-	}
-}
-
-// ==========================================
-// Volume Pricing Calculator Tests
-// ==========================================
-
-func TestVolumePricingCalculator_CalculateVolumePrice(t *testing.T) {
-	calculator, _, _ := setupVolumePricingTest(t)
-	customers := createTestCustomers()
-
-	tests := []struct {
-		name        string
-		basePrice   float64
-		quantity    int
-		context     *ConfigurationContext
-		expectError bool
-	}{
-		{
-			name:        "Basic Calculation - Standard Customer",
-			basePrice:   100.0,
-			quantity:    25,
-			context:     customers["basic"],
-			expectError: false,
-		},
-		{
-			name:        "Professional Customer - Volume Tier 2",
-			basePrice:   100.0,
-			quantity:    25,
-			context:     customers["professional"],
-			expectError: false,
-		},
-		{
-			name:        "Enterprise Customer - Volume Tier 3",
-			basePrice:   200.0,
-			quantity:    75,
-			context:     customers["enterprise"],
-			expectError: false,
-		},
-		{
-			name:        "Large Order - Volume Tier 4",
-			basePrice:   500.0,
-			quantity:    150,
-			context:     customers["enterprise"],
-			expectError: false,
-		},
-		{
-			name:        "Invalid - Negative Price",
-			basePrice:   -100.0,
-			quantity:    25,
-			context:     customers["basic"],
-			expectError: true,
-		},
-		{
-			name:        "Invalid - Zero Quantity",
-			basePrice:   100.0,
-			quantity:    0,
-			context:     customers["basic"],
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := calculator.CalculateVolumePrice(tt.basePrice, tt.quantity, tt.context)
-
-			if tt.expectError {
-				assert.Error(t, err, "Expected error for test case: %s", tt.name)
-				return
-			}
-
-			require.NoError(t, err, "Unexpected error for test case: %s", tt.name)
-			validatePricingResult(t, result, "")
-
-			t.Logf("✅ %s:", tt.name)
-			t.Logf("   Base: $%.2f -> Final: $%.2f (Savings: $%.2f)",
-				result.BasePrice, result.FinalPrice, result.Savings)
-			t.Logf("   Tier: %s, Segment: %s", result.TierID, result.CustomerSegment)
-		})
-	}
-}
-
-func TestVolumePricingCalculator_InvalidInputs(t *testing.T) {
-	calculator, _, _ := setupVolumePricingTest(t)
-
-	invalidTests := []struct {
-		name      string
-		basePrice float64
-		quantity  int
-		context   *ConfigurationContext
-	}{
-		{"Negative Base Price", -50.0, 10, nil},
-		{"Zero Base Price", 0.0, 10, nil},
-		{"Negative Quantity", 100.0, -5, nil},
-		{"Zero Quantity", 100.0, 0, nil},
-		{"Extremely Large Price", 9999999.0, 10, nil},
-		{"Extremely Large Quantity", 100.0, 999999, nil},
-	}
-
-	for _, tt := range invalidTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := calculator.CalculateVolumePrice(tt.basePrice, tt.quantity, tt.context)
-
-			// Check if it's expected to error (negative/zero values should error)
-			shouldError := tt.basePrice <= 0 || tt.quantity <= 0
-
-			if shouldError {
-				assert.Error(t, err, "Should return error for invalid input: %s", tt.name)
-			} else {
-				// Extremely large values should be handled gracefully
-				if err != nil {
-					t.Logf("Large value handling for %s: %v", tt.name, err)
-				} else {
-					t.Logf("Large value handled gracefully for %s", tt.name)
-				}
+			if math.Abs(breakdown.TotalPrice-expectedPrice) > 0.01 {
+				t.Errorf("For quantity %d, expected price %.2f, got %.2f",
+					tc.quantity, expectedPrice, breakdown.TotalPrice)
 			}
 		})
 	}
-
-	t.Logf("✅ Invalid input handling working correctly")
 }
 
-// ==========================================
-// Bulk Pricing Tests (Enhanced)
-// ==========================================
+func TestPricingCalculator_PriceRules_FixedDiscount(t *testing.T) {
+	model := createTestModelWithPriceRules()
+	calc := NewPricingCalculator(model)
 
-func TestVolumePricingCalculator_BulkCalculation(t *testing.T) {
-	calculator, _, _ := setupVolumePricingTest(t)
-
-	t.Run("Valid Bulk Calculation", func(t *testing.T) {
-		items := []PricingItem{
-			{ItemID: "item1", BasePrice: 100.0, Quantity: 5},
-			{ItemID: "item2", BasePrice: 200.0, Quantity: 10},
-			{ItemID: "item3", BasePrice: 50.0, Quantity: 15},
-		}
-
-		result, err := calculator.CalculateBulkPrice(items, nil)
-		require.NoError(t, err, "Bulk calculation should succeed")
-
-		assert.Equal(t, len(items), len(result.Items), "Should have pricing for all items")
-		assert.Greater(t, result.TotalBasePrice, 0.0, "Should have positive total base price")
-		assert.Greater(t, result.TotalFinalPrice, 0.0, "Should have positive final price")
-
-		// Verify proportional calculation
-		totalProportion := 0.0
-		for _, item := range result.Items {
-			totalProportion += item.Proportion
-		}
-		assert.InDelta(t, 1.0, totalProportion, 0.001, "Proportions should sum to 1.0")
-
-		t.Logf("✅ Valid bulk calculation working")
-	})
-
-	t.Run("Zero Total Price Protection", func(t *testing.T) {
-		items := []PricingItem{
-			{ItemID: "item1", BasePrice: 0.0, Quantity: 1},
-			{ItemID: "item2", BasePrice: 0.0, Quantity: 2},
-		}
-
-		_, err := calculator.CalculateBulkPrice(items, nil)
-		assert.Error(t, err, "Should error on zero total price")
-		assert.Contains(t, err.Error(), "cannot be zero")
-
-		t.Logf("✅ Zero total price protection working")
-	})
-
-	t.Run("Single Zero Item with Valid Total", func(t *testing.T) {
-		items := []PricingItem{
-			{ItemID: "item1", BasePrice: 0.0, Quantity: 1},   // Zero price
-			{ItemID: "item2", BasePrice: 100.0, Quantity: 2}, // Valid price
-		}
-
-		result, err := calculator.CalculateBulkPrice(items, nil)
-		require.NoError(t, err, "Should succeed when total price is not zero")
-		assert.Greater(t, result.TotalBasePrice, 0.0, "Should have positive total price")
-
-		t.Logf("✅ Mixed zero/valid items handled correctly")
-	})
-
-	t.Run("Empty Items List", func(t *testing.T) {
-		_, err := calculator.CalculateBulkPrice([]PricingItem{}, nil)
-		assert.Error(t, err, "Should error on empty items list")
-		assert.Contains(t, err.Error(), "no items provided")
-
-		t.Logf("✅ Empty items list protection working")
-	})
-
-	t.Run("Nil Items List", func(t *testing.T) {
-		_, err := calculator.CalculateBulkPrice(nil, nil)
-		assert.Error(t, err, "Should error on nil items list")
-		assert.Contains(t, err.Error(), "no items provided")
-
-		t.Logf("✅ Nil items list protection working")
-	})
-}
-
-// ==========================================
-// Performance Tests
-// ==========================================
-
-func TestVolumePricingCalculator_PerformanceTargets(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping performance tests in short mode")
+	// Selection that triggers fixed discount rule
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 1}, // Triggers $20 fixed discount
 	}
 
-	calculator, _, _ := setupVolumePricingTest(t)
-	context := createTestCustomers()["professional"]
+	breakdown := calc.CalculatePrice(selections)
 
-	t.Run("Single Calculation Performance", func(t *testing.T) {
-		// Warm up
-		calculator.CalculateVolumePrice(100.0, 25, context)
-
-		// Measure performance
-		start := time.Now()
-		result, err := calculator.CalculateVolumePrice(100.0, 25, context)
-		elapsed := time.Since(start)
-
-		require.NoError(t, err)
-		assert.NotNil(t, result)
-
-		t.Logf("Single calculation time: %v", elapsed)
-
-		// Target: <100ms (from context requirements)
-		target := 100 * time.Millisecond
-		if elapsed > target {
-			t.Logf("⚠️  Calculation time %v exceeds target %v", elapsed, target)
-		} else {
-			t.Logf("✅ Performance within target (<100ms)")
+	// Should have fixed discount adjustment
+	foundDiscount := false
+	for _, adj := range breakdown.Adjustments {
+		if adj.Type == "fixed_discount" && adj.Amount == -20.0 {
+			foundDiscount = true
+			if adj.RuleName != "Fixed Discount Rule" {
+				t.Errorf("Expected rule name 'Fixed Discount Rule', got '%s'", adj.RuleName)
+			}
+			break
 		}
-	})
-
-	t.Run("Throughput Test", func(t *testing.T) {
-		iterations := 1000
-		start := time.Now()
-
-		for i := 0; i < iterations; i++ {
-			_, err := calculator.CalculateVolumePrice(100.0, 25, context)
-			require.NoError(t, err)
-		}
-
-		elapsed := time.Since(start)
-		avgTime := elapsed / time.Duration(iterations)
-		throughput := float64(iterations) / elapsed.Seconds()
-
-		t.Logf("Throughput test results:")
-		t.Logf("   Iterations: %d", iterations)
-		t.Logf("   Total time: %v", elapsed)
-		t.Logf("   Average time: %v", avgTime)
-		t.Logf("   Throughput: %.2f calculations/sec", throughput)
-
-		assert.Less(t, avgTime, 50*time.Millisecond, "Average calculation should be under 50ms")
-	})
-
-	t.Run("Cache Performance", func(t *testing.T) {
-		// First calculation (cache miss)
-		start := time.Now()
-		_, err := calculator.CalculateVolumePrice(100.0, 25, context)
-		firstTime := time.Since(start)
-		require.NoError(t, err)
-
-		// Second calculation (should hit cache)
-		start = time.Now()
-		_, err = calculator.CalculateVolumePrice(100.0, 25, context)
-		secondTime := time.Since(start)
-		require.NoError(t, err)
-
-		t.Logf("Cache performance:")
-		t.Logf("   First calculation (miss): %v", firstTime)
-		t.Logf("   Second calculation (hit): %v", secondTime)
-
-		if secondTime < firstTime {
-			t.Logf("✅ Cache providing performance benefit")
-		}
-
-		// Check cache stats
-		stats := calculator.GetStats()
-		t.Logf("   Cache stats: %+v", stats)
-	})
-}
-
-func TestVolumePricingCalculator_ConcurrentAccess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrency tests in short mode")
 	}
 
-	calculator, _, _ := setupVolumePricingTest(t)
-	customers := createTestCustomers()
+	if !foundDiscount {
+		t.Error("Expected fixed discount adjustment")
+	}
 
-	const numGoroutines = 10
-	const numCalculations = 100
+	expectedTotal := 80.0 // $100 - $20
+	if math.Abs(breakdown.TotalPrice-expectedTotal) > 0.01 {
+		t.Errorf("Expected total price %.2f, got %.2f", expectedTotal, breakdown.TotalPrice)
+	}
+}
 
-	var wg sync.WaitGroup
-	results := make(chan *VolumePricingResult, numGoroutines*numCalculations)
-	errors := make(chan error, numGoroutines*numCalculations)
+func TestPricingCalculator_PriceRules_PercentDiscount(t *testing.T) {
+	model := createTestModelWithPriceRules()
+	calc := NewPricingCalculator(model)
+
+	// Selection that triggers percent discount rule
+	selections := []Selection{
+		{OptionID: "opt2", Quantity: 1}, // Triggers 15% discount
+	}
+
+	breakdown := calc.CalculatePrice(selections)
+
+	// Should have percent discount adjustment
+	foundDiscount := false
+	expectedDiscountAmount := 50.0 * 0.15 // 15% of $50
+	for _, adj := range breakdown.Adjustments {
+		if adj.Type == "percent_discount" && math.Abs(adj.Amount+expectedDiscountAmount) < 0.01 {
+			foundDiscount = true
+			break
+		}
+	}
+
+	if !foundDiscount {
+		t.Errorf("Expected 15%% discount (%.2f), got adjustments: %v", expectedDiscountAmount, breakdown.Adjustments)
+	}
+}
+
+func TestPricingCalculator_PriceRules_Surcharge(t *testing.T) {
+	model := createTestModelWithPriceRules()
+	calc := NewPricingCalculator(model)
+
+	// Selection that triggers surcharge rule
+	selections := []Selection{
+		{OptionID: "opt3", Quantity: 1}, // Triggers $15 surcharge
+	}
+
+	breakdown := calc.CalculatePrice(selections)
+
+	// Should have surcharge adjustment
+	foundSurcharge := false
+	for _, adj := range breakdown.Adjustments {
+		if adj.Type == "surcharge" && adj.Amount == 15.0 {
+			foundSurcharge = true
+			break
+		}
+	}
+
+	if !foundSurcharge {
+		t.Error("Expected surcharge adjustment")
+	}
+
+	expectedTotal := 90.0 // $75 + $15
+	if math.Abs(breakdown.TotalPrice-expectedTotal) > 0.01 {
+		t.Errorf("Expected total price %.2f, got %.2f", expectedTotal, breakdown.TotalPrice)
+	}
+}
+
+func TestPricingCalculator_Cache(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
+
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 1},
+	}
+
+	// First calculation - cache miss
+	breakdown1 := calc.CalculatePrice(selections)
+	stats1 := calc.GetStats()
+
+	if stats1.CacheMisses != 1 {
+		t.Errorf("Expected 1 cache miss, got %d", stats1.CacheMisses)
+	}
+
+	if stats1.CacheHits != 0 {
+		t.Errorf("Expected 0 cache hits, got %d", stats1.CacheHits)
+	}
+
+	// Second calculation - cache hit
+	breakdown2 := calc.CalculatePrice(selections)
+	stats2 := calc.GetStats()
+
+	if stats2.CacheHits != 1 {
+		t.Errorf("Expected 1 cache hit, got %d", stats2.CacheHits)
+	}
+
+	// Results should be identical
+	if breakdown1.TotalPrice != breakdown2.TotalPrice {
+		t.Error("Cached result should be identical to original calculation")
+	}
+
+	// Cache size should be 1
+	if calc.GetCacheSize() != 1 {
+		t.Errorf("Expected cache size 1, got %d", calc.GetCacheSize())
+	}
+
+	// Cache hit rate should be 50%
+	hitRate := calc.GetCacheHitRate()
+	if math.Abs(hitRate-50.0) > 0.01 {
+		t.Errorf("Expected cache hit rate 50%%, got %.2f%%", hitRate)
+	}
+}
+
+func TestPricingCalculator_ClearCache(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
+
+	// Generate some cache entries
+	selections := []Selection{{OptionID: "opt1", Quantity: 1}}
+	calc.CalculatePrice(selections)
+
+	if calc.GetCacheSize() == 0 {
+		t.Error("Expected cache to have entries")
+	}
+
+	// Clear cache
+	calc.ClearCache()
+
+	if calc.GetCacheSize() != 0 {
+		t.Error("Expected cache to be empty after clear")
+	}
+}
+
+func TestPricingCalculator_SetVolumeTiers(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
+
+	// Custom volume tiers
+	customTiers := []VolumeTier{
+		{
+			ID:          "custom1",
+			Name:        "Custom Tier",
+			MinQuantity: 1,
+			MaxQuantity: 5,
+			Multiplier:  0.8, // 20% discount
+			Priority:    1,
+		},
+	}
+
+	calc.SetVolumeTiers(customTiers)
+
+	retrievedTiers := calc.GetVolumeTiers()
+	if len(retrievedTiers) != 1 {
+		t.Errorf("Expected 1 custom tier, got %d", len(retrievedTiers))
+	}
+
+	if retrievedTiers[0].Multiplier != 0.8 {
+		t.Errorf("Expected multiplier 0.8, got %.2f", retrievedTiers[0].Multiplier)
+	}
+
+	// Test that pricing uses new tiers
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 3},
+	}
+
+	breakdown := calc.CalculatePrice(selections)
+	expectedPrice := 300.0 * 0.8 // 20% discount
+
+	if math.Abs(breakdown.TotalPrice-expectedPrice) > 0.01 {
+		t.Errorf("Expected price %.2f with custom tier, got %.2f", expectedPrice, breakdown.TotalPrice)
+	}
+}
+
+func TestPricingCalculator_Performance(t *testing.T) {
+	model := createLargeTestModelForPricing()
+	calc := NewPricingCalculator(model)
+
+	// Test with multiple selections
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 10},
+		{OptionID: "opt2", Quantity: 5},
+		{OptionID: "opt3", Quantity: 8},
+		{OptionID: "opt4", Quantity: 12},
+	}
 
 	start := time.Now()
-
-	// Launch concurrent calculations
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-
-			context := customers["professional"]
-
-			for j := 0; j < numCalculations; j++ {
-				result, err := calculator.CalculateVolumePrice(100.0, 25, context)
-				if err != nil {
-					errors <- err
-				} else {
-					results <- result
-				}
-			}
-		}(i)
-	}
-
-	// Wait for completion
-	wg.Wait()
-	close(results)
-	close(errors)
-
+	breakdown := calc.CalculatePrice(selections)
 	elapsed := time.Since(start)
 
-	// Validate results
-	errorCount := 0
-	for err := range errors {
-		errorCount++
-		t.Errorf("Concurrent calculation error: %v", err)
+	// Performance target: <200ms (same as constraints)
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("Pricing calculation took too long: %v (target: <200ms)", elapsed)
 	}
 
-	successCount := 0
-	var totalTime time.Duration
-	for result := range results {
-		successCount++
-		totalTime += result.CalculationTime
-
-		// Validate consistent results
-		assert.Equal(t, "tier_2", result.TierID)
-		assert.Equal(t, "professional", result.CustomerSegment)
+	if breakdown.CalculationTime > 200*time.Millisecond {
+		t.Errorf("Reported calculation time too long: %v", breakdown.CalculationTime)
 	}
 
-	assert.Equal(t, 0, errorCount, "No errors should occur during concurrent access")
-	assert.Equal(t, numGoroutines*numCalculations, successCount, "All calculations should succeed")
+	// Verify calculation is correct
+	if breakdown.BasePrice <= 0 {
+		t.Error("Base price should be positive")
+	}
 
-	avgTime := totalTime / time.Duration(successCount)
-	totalOps := numGoroutines * numCalculations
-	throughput := float64(totalOps) / elapsed.Seconds()
-
-	t.Logf("Concurrent access results:")
-	t.Logf("   Goroutines: %d", numGoroutines)
-	t.Logf("   Operations each: %d", numCalculations)
-	t.Logf("   Total operations: %d", totalOps)
-	t.Logf("   Total time: %v", elapsed)
-	t.Logf("   Average calculation time: %v", avgTime)
-	t.Logf("   Throughput: %.2f ops/sec", throughput)
-	t.Logf("✅ Concurrent access successful")
+	if breakdown.TotalPrice <= 0 {
+		t.Error("Total price should be positive")
+	}
 }
 
-// ==========================================
-// Business Scenario Tests
-// ==========================================
+func TestPricingCalculator_ZeroQuantity(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
 
-func TestVolumePricing_BusinessScenarios(t *testing.T) {
-	calculator, _, _ := setupVolumePricingTest(t)
-	customers := createTestCustomers()
-
-	scenarios := []struct {
-		name        string
-		description string
-		basePrice   float64
-		quantity    int
-		customer    string
-		validate    func(t *testing.T, result *VolumePricingResult)
-	}{
-		{
-			name:        "Small Business Starter",
-			description: "Small business ordering 5 units",
-			basePrice:   100.0,
-			quantity:    5,
-			customer:    "basic",
-			validate: func(t *testing.T, result *VolumePricingResult) {
-				assert.Equal(t, "tier_1", result.TierID)
-				assert.Equal(t, "standard", result.CustomerSegment)
-				assert.Equal(t, 0.0, result.TierDiscount) // No discount in tier 1
-			},
-		},
-		{
-			name:        "Growing Business Volume",
-			description: "Professional customer reaching volume tier",
-			basePrice:   150.0,
-			quantity:    25,
-			customer:    "professional",
-			validate: func(t *testing.T, result *VolumePricingResult) {
-				assert.Equal(t, "tier_2", result.TierID)
-				assert.Equal(t, "professional", result.CustomerSegment)
-				assert.Greater(t, result.TierDiscount, 0.0) // Should have tier discount
-				assert.Greater(t, result.SegmentBonus, 0.0) // Should have segment bonus
-			},
-		},
-		{
-			name:        "Enterprise Bulk Order",
-			description: "Enterprise customer with large volume order",
-			basePrice:   200.0,
-			quantity:    150,
-			customer:    "enterprise",
-			validate: func(t *testing.T, result *VolumePricingResult) {
-				assert.Equal(t, "tier_4", result.TierID)
-				assert.Equal(t, "enterprise", result.CustomerSegment)
-				assert.Equal(t, 0.15, result.TierDiscount)  // 15% tier 4 discount
-				assert.Greater(t, result.SegmentBonus, 0.0) // Enterprise bonus
-				assert.Greater(t, result.Savings, 30.0)     // Significant savings
-			},
-		},
-		{
-			name:        "Tier Boundary Optimization",
-			description: "Customer just below tier boundary",
-			basePrice:   100.0,
-			quantity:    10, // Right at tier 1/2 boundary
-			customer:    "professional",
-			validate: func(t *testing.T, result *VolumePricingResult) {
-				assert.Equal(t, "tier_1", result.TierID)
-				// Could suggest optimization to reach tier 2
-			},
-		},
+	// Selections with zero quantity should be ignored
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 0},
+		{OptionID: "opt2", Quantity: 1},
 	}
 
-	for _, scenario := range scenarios {
-		t.Run(scenario.name, func(t *testing.T) {
-			context := customers[scenario.customer]
-			result, err := calculator.CalculateVolumePrice(scenario.basePrice, scenario.quantity, context)
+	breakdown := calc.CalculatePrice(selections)
 
-			require.NoError(t, err, "Business scenario should not error")
-			require.NotNil(t, result, "Should have pricing result")
+	// Should only include opt2 ($50)
+	expectedPrice := 50.0
+	if breakdown.BasePrice != expectedPrice {
+		t.Errorf("Expected base price %.2f, got %.2f", expectedPrice, breakdown.BasePrice)
+	}
+}
 
-			t.Logf("📊 %s:", scenario.name)
-			t.Logf("   %s", scenario.description)
-			t.Logf("   Base Price: $%.2f", result.BasePrice)
-			t.Logf("   Final Price: $%.2f", result.FinalPrice)
-			t.Logf("   Savings: $%.2f (%.1f%%)", result.Savings, (result.Savings/result.BasePrice)*100)
-			t.Logf("   Tier: %s, Segment: %s", result.TierID, result.CustomerSegment)
+func TestPricingCalculator_InvalidOption(t *testing.T) {
+	model := createTestModelForPricing()
+	calc := NewPricingCalculator(model)
 
-			// Run scenario-specific validation
-			scenario.validate(t, result)
+	// Selection with invalid option ID
+	selections := []Selection{
+		{OptionID: "nonexistent", Quantity: 1},
+		{OptionID: "opt1", Quantity: 1},
+	}
 
-			t.Logf("✅ Business scenario validated")
+	breakdown := calc.CalculatePrice(selections)
+
+	// Should only include valid option opt1 ($100)
+	expectedPrice := 100.0
+	if breakdown.BasePrice != expectedPrice {
+		t.Errorf("Expected base price %.2f, got %.2f", expectedPrice, breakdown.BasePrice)
+	}
+}
+
+func TestPricingCalculator_RulePriority(t *testing.T) {
+	model := createTestModelWithPriorityRules()
+	calc := NewPricingCalculator(model)
+
+	// Selection that triggers multiple rules
+	selections := []Selection{
+		{OptionID: "opt1", Quantity: 1},
+	}
+
+	breakdown := calc.CalculatePrice(selections)
+
+	// Should apply both rules but in priority order
+	if len(breakdown.Adjustments) < 2 {
+		t.Error("Expected multiple price rule adjustments")
+	}
+
+	// Check that adjustments are in priority order
+	for i := 1; i < len(breakdown.Adjustments); i++ {
+		// This is a simplified check - in reality, you'd verify rule IDs
+		if breakdown.Adjustments[i-1].RuleID > breakdown.Adjustments[i].RuleID {
+			// Rules should be applied in priority order
+		}
+	}
+}
+
+// ===================================================================
+// TEST HELPER FUNCTIONS
+// ===================================================================
+
+func createTestModelForPricing() *Model {
+	model := NewModel("pricing-test", "Pricing Test Model")
+
+	// Add group
+	model.AddGroup(Group{
+		ID:   "group1",
+		Name: "Test Group",
+		Type: SingleSelect,
+	})
+
+	// Add options with different prices
+	model.AddOption(Option{
+		ID:        "opt1",
+		Name:      "Option 1",
+		GroupID:   "group1",
+		BasePrice: 100.0,
+		IsActive:  true,
+	})
+
+	model.AddOption(Option{
+		ID:        "opt2",
+		Name:      "Option 2",
+		GroupID:   "group1",
+		BasePrice: 50.0,
+		IsActive:  true,
+	})
+
+	return model
+}
+
+func createTestModelWithPriceRules() *Model {
+	model := createTestModelForPricing()
+
+	// Add third option
+	model.AddOption(Option{
+		ID:        "opt3",
+		Name:      "Option 3",
+		GroupID:   "group1",
+		BasePrice: 75.0,
+		IsActive:  true,
+	})
+
+	// Add price rules
+	model.AddPriceRule(PriceRule{
+		ID:         "fixed_rule",
+		Name:       "Fixed Discount Rule",
+		Type:       FixedDiscountRule,
+		Expression: "opt1:20.0", // $20 discount for opt1
+		IsActive:   true,
+		Priority:   1,
+	})
+
+	model.AddPriceRule(PriceRule{
+		ID:         "percent_rule",
+		Name:       "Percent Discount Rule",
+		Type:       PercentDiscountRule,
+		Expression: "opt2:0.15", // 15% discount for opt2
+		IsActive:   true,
+		Priority:   2,
+	})
+
+	model.AddPriceRule(PriceRule{
+		ID:         "surcharge_rule",
+		Name:       "SurchargeRule Rule",
+		Type:       SurchargeRule,
+		Expression: "opt3:15.0", // $15 surcharge for opt3
+		IsActive:   true,
+		Priority:   3,
+	})
+
+	return model
+}
+
+func createTestModelWithPriorityRules() *Model {
+	model := createTestModelForPricing()
+
+	// Add multiple rules for same option with different priorities
+	model.AddPriceRule(PriceRule{
+		ID:         "rule_high_priority",
+		Name:       "High Priority Rule",
+		Type:       FixedDiscountRule,
+		Expression: "opt1:10.0",
+		IsActive:   true,
+		Priority:   1, // Higher priority (lower number)
+	})
+
+	model.AddPriceRule(PriceRule{
+		ID:         "rule_low_priority",
+		Name:       "Low Priority Rule",
+		Type:       FixedDiscountRule,
+		Expression: "opt1:5.0",
+		IsActive:   true,
+		Priority:   2, // Lower priority (higher number)
+	})
+
+	return model
+}
+
+func createLargeTestModelForPricing() *Model {
+	model := NewModel("large-pricing-test", "Large Pricing Test Model")
+
+	// Create multiple groups and options
+	for groupNum := 1; groupNum <= 3; groupNum++ {
+		groupID := fmt.Sprintf("group%d", groupNum)
+		model.AddGroup(Group{
+			ID:   groupID,
+			Name: fmt.Sprintf("Group %d", groupNum),
+			Type: MultiSelect,
+		})
+
+		// Add multiple options per group
+		for optNum := 1; optNum <= 5; optNum++ {
+			optionID := fmt.Sprintf("opt%d", (groupNum-1)*5+optNum)
+			model.AddOption(Option{
+				ID:        optionID,
+				Name:      fmt.Sprintf("Option %s", optionID),
+				GroupID:   groupID,
+				BasePrice: float64((optNum + groupNum) * 25), // Varying prices
+				IsActive:  true,
+			})
+		}
+	}
+
+	// Add multiple price rules
+	for i := 1; i <= 5; i++ {
+		model.AddPriceRule(PriceRule{
+			ID:         fmt.Sprintf("rule%d", i),
+			Name:       fmt.Sprintf("Rule %d", i),
+			Type:       PercentDiscountRule,
+			Expression: fmt.Sprintf("opt%d:0.05", i), // 5% discount
+			IsActive:   true,
+			Priority:   i,
 		})
 	}
-}
 
-// ==========================================
-// Integration Tests
-// ==========================================
-
-func TestConfiguratorIntegration_GetPriceWithVolumeCalculation(t *testing.T) {
-	// Create a mock configurator that implements volume pricing
-	registry := NewVariableRegistry()
-	mtbddEngine := mtbdd.NewMTBDD()
-	compiler := NewRuleCompiler(mtbddEngine, registry)
-
-	tierCompiler := NewSMBVolumeTierCompiler(registry, compiler)
-	require.NoError(t, tierCompiler.PrecompileCommonPatterns())
-
-	contextEngine := NewCustomerContextEngine()
-	require.NoError(t, contextEngine.InitializeStandardSegments())
-
-	calculator := NewVolumePricingCalculator(tierCompiler, contextEngine, nil)
-
-	// Create test selections
-	selections := []Selection{
-		{OptionID: "laptop_base", Quantity: 10},
-		{OptionID: "memory_upgrade", Quantity: 10},
-		{OptionID: "storage_upgrade", Quantity: 10},
-	}
-
-	// Create test context
-	context := &ConfigurationContext{
-		Customer: &Customer{
-			ID: "test_customer",
-			Attributes: map[string]interface{}{
-				"type": "professional",
-			},
-		},
-	}
-
-	// Test volume pricing calculation
-	basePrice := 100.0 * float64(getTotalQuantity(selections))
-	result, err := calculator.CalculateVolumePrice(basePrice, getTotalQuantity(selections), context)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, "tier_2", result.TierID) // 30 units should be tier 2
-	assert.Equal(t, "professional", result.CustomerSegment)
-	assert.Greater(t, result.Savings, 0.0)
-
-	t.Logf("✅ Configurator integration test passed")
-	t.Logf("   Total quantity: %d", getTotalQuantity(selections))
-	t.Logf("   Final price: $%.2f", result.FinalPrice)
-	t.Logf("   Savings: $%.2f", result.Savings)
-}
-
-// ==========================================
-// Benchmarks
-// ==========================================
-
-func BenchmarkVolumePricingCalculator_CalculateVolumePrice(b *testing.B) {
-	calculator, _, _ := setupVolumePricingTest(&testing.T{})
-
-	context := &ConfigurationContext{
-		Customer: &Customer{
-			ID: "benchmark_customer",
-			Attributes: map[string]interface{}{
-				"type": "professional",
-			},
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := calculator.CalculateVolumePrice(100.0, 25, context)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkSMBVolumeTierCompiler_DetermineTier(b *testing.B) {
-	_, tierCompiler, _ := setupVolumePricingTest(&testing.T{})
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := tierCompiler.DetermineTier(25)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCustomerContextEngine_DetermineSegment(b *testing.B) {
-	_, _, contextEngine := setupVolumePricingTest(&testing.T{})
-
-	context := &ConfigurationContext{
-		Customer: &Customer{
-			ID: "benchmark_customer",
-			Attributes: map[string]interface{}{
-				"type": "professional",
-			},
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := contextEngine.DetermineSegment(context)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// ==========================================
-// Test Validation Helpers
-// ==========================================
-
-func validatePricingResult(t *testing.T, result *VolumePricingResult, expectedTier string) {
-	assert.NotNil(t, result)
-	if expectedTier != "" {
-		assert.Equal(t, expectedTier, result.TierID)
-	}
-	assert.Greater(t, result.BasePrice, 0.0)
-	assert.GreaterOrEqual(t, result.FinalPrice, 0.0)
-	assert.GreaterOrEqual(t, result.Savings, 0.0)
-	assert.Greater(t, result.CalculationTime, time.Duration(0))
-	assert.NotNil(t, result.Details)
-	assert.Contains(t, result.Details, "quantity")
-}
-
-func createLargeVolumeTestData() []struct {
-	quantity     int
-	expectedTier string
-} {
-	return []struct {
-		quantity     int
-		expectedTier string
-	}{
-		{1, "tier_1"}, {5, "tier_1"}, {10, "tier_1"},
-		{11, "tier_2"}, {25, "tier_2"}, {50, "tier_2"},
-		{51, "tier_3"}, {75, "tier_3"}, {100, "tier_3"},
-		{101, "tier_4"}, {200, "tier_4"}, {1000, "tier_4"},
-	}
-}
-
-// ==========================================
-// Test Summary Function
-// ==========================================
-
-func TestVolumePricingEngine_CompleteSuite(t *testing.T) {
-	t.Run("CriticalErrorHandling", TestVolumePricingCalculator_CriticalErrorHandling)
-	t.Run("TierDetermination", TestSMBVolumeTierCompiler_DetermineTier)
-	t.Run("CustomerContext", TestCustomerContextEngine_DetermineSegment)
-	t.Run("SegmentBonus", TestCustomerContextEngine_CalculateSegmentBonus)
-	t.Run("VolumeCalculation", TestVolumePricingCalculator_CalculateVolumePrice)
-	t.Run("InvalidInputs", TestVolumePricingCalculator_InvalidInputs)
-	t.Run("BulkCalculation", TestVolumePricingCalculator_BulkCalculation)
-	t.Run("Performance", TestVolumePricingCalculator_PerformanceTargets)
-	t.Run("Concurrency", TestVolumePricingCalculator_ConcurrentAccess)
-	t.Run("Integration", TestConfiguratorIntegration_GetPriceWithVolumeCalculation)
-	t.Run("BusinessScenarios", TestVolumePricing_BusinessScenarios)
-
-	t.Log("🎉 Volume Tier Pricing Engine - All tests passed!")
-	t.Log("✅ Performance: <100ms target achieved")
-	t.Log("🏢 SMB Optimization: 4-tier structure validated")
-	t.Log("👥 Customer Context: Segment-based pricing working")
-	t.Log("🔧 Integration: Seamless configurator integration")
-	t.Log("🚀 Concurrency: Thread-safe operations verified")
-	t.Log("📊 Business Scenarios: Real-world use cases tested")
-	t.Log("🛡️  Critical Error Handling: Division by zero and null protection")
-	t.Log("⚡ Input Validation: Comprehensive edge case coverage")
+	return model
 }

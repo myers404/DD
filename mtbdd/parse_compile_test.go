@@ -500,7 +500,6 @@ func TestComprehensiveMTBDDCompilation(t *testing.T) {
 
 			// Compile the expression
 			nodeRef, ctx, err := Compile(expr, mtbddInstance)
-
 			if tt.shouldError {
 				if err == nil {
 					t.Errorf("Expected compilation error but got none")

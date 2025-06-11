@@ -242,7 +242,8 @@ func ParseAndCompile(input string, mtbdd *MTBDD) (NodeRef, CompilerContext, erro
 // ===== VISITOR IMPLEMENTATION =====
 
 func (c *MTBDDCompiler) VisitNumberLiteral(node *parser.NumberLiteral) (interface{}, error) {
-	return c.context.CreateConstant(node.Value), nil
+	x := c.context.CreateConstant(node.Value)
+	return x, nil
 }
 
 func (c *MTBDDCompiler) VisitBooleanLiteral(node *parser.BooleanLiteral) (interface{}, error) {

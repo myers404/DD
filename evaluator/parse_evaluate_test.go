@@ -834,7 +834,7 @@ func TestParseErrors(t *testing.T) {
 		},
 		{
 			name:        "Single Ampersand",
-			expression:  "x & y",
+			expression:  "x && y",
 			expectError: "Expected '&&'",
 		},
 		{
