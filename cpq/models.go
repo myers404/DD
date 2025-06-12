@@ -37,6 +37,7 @@ type Group struct {
 	MaxSelections int       `json:"max_selections"`
 	IsRequired    bool      `json:"is_required"`
 	DisplayOrder  int       `json:"display_order"`
+	OptionIDs     []string  `json:"option_ids"`
 }
 
 // Option defines configurable options within groups
@@ -49,6 +50,7 @@ type Option struct {
 	IsDefault    bool    `json:"is_default"`
 	IsActive     bool    `json:"is_active"`
 	DisplayOrder int     `json:"display_order"`
+	Price        float64 `json:"price"`
 }
 
 // Rule defines static boolean constraints (Phase 1)
@@ -145,6 +147,8 @@ const (
 	ExcludesRule    RuleType = "excludes"         // A excludes B
 	MutualExclusive RuleType = "mutual_exclusive" // Only one of A,B,C
 	GroupLimit      RuleType = "group_limit"      // Group quantity limits
+	PricingRule     RuleType = "pricing_rule"
+	ValidationRule  RuleType = "validation_rule"
 )
 
 type PriceRuleType string

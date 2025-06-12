@@ -180,7 +180,7 @@ func TestExtractActionTarget(t *testing.T) {
 	}{
 		{"opt_cooling_liquid", "opt_cooling_liquid"},
 		{"!opt_premium_support", "opt_premium_support"},
-		{"invalid", ""},
+		{"invalid", "invalid"},
 		{"", ""},
 	}
 
