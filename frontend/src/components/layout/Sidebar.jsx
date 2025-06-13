@@ -112,8 +112,8 @@ const Sidebar = () => {
   });
 
   // Quick access models
-  const quickAccessModels = models?.slice(0, 3) || [];
-
+  const quickAccessModels = (Array.isArray(models) ? models : []).slice(0, 3) || [];
+  
   return (
     <div className={`bg-gray-900 text-white transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'} min-h-screen flex flex-col`}>
       {/* Header */}

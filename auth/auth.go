@@ -154,7 +154,7 @@ func (s *Service) AuthMiddleware(next http.Handler) http.Handler {
 		claims, err := s.ValidateToken(tokenString)
 		if err != nil {
 			log.Printf("Token validation failed: %v", err)
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			http.Error(w, "Invalid token", http.StatusForbidden)
 			return
 		}
 

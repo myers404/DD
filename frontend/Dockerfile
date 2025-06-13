@@ -16,26 +16,34 @@ RUN npm ci --only=production
 # Copy source code
 COPY frontend/ .
 
-RUN npm install
+RUN npm ci
 
 # Build the React application
 RUN npm run build
 
-# Stage 2: Serve with Nginx
-FROM nginx:alpine
+EXPOSE 4173
 
-# Copy built React app to Nginx serve directory
-COPY --from=build /app/dist /usr/share/nginx/html
+# Vite preview has built-in health
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:4173 || exit 1
 
-# Copy custom Nginx configuration
-COPY frontend/nginx.conf /etc/nginx/nginx.conf
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
-# Expose port 80
-EXPOSE 80
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:80/ || exit 1
-
-# Start Nginx
-CMD ["nginx", "-g", "daemon off;"]
+## Stage 2: Serve with Nginx
+#FROM nginx:alpine
+#
+## Copy built React app to Nginx serve directory
+#COPY --from=build /app/dist /usr/share/nginx/html
+#
+## Copy custom Nginx configuration
+#COPY frontend/nginx.conf /etc/nginx/nginx.conf
+#
+## Expose port 80
+#EXPOSE 80
+#
+## Health check
+#HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+#  CMD curl -f http://localhost:80/ || exit 1
+#
+## Start Nginx
+#CMD ["nginx", "-g", "daemon off;"]

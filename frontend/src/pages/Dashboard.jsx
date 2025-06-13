@@ -391,7 +391,7 @@ const Dashboard = () => {
           </div>
           
           <div className="space-y-3">
-            {models?.slice(0, 5).map((model, index) => (
+            {(Array.isArray(models) ? models : []).slice(0, 5).map((model, index) => (
               <motion.div
                 key={model.id}
                 initial={{ opacity: 0, x: 20 }}

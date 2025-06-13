@@ -1,0 +1,97 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.17kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.3-alpine
+#2 ...
+
+#3 [internal] load metadata for docker.io/library/alpine:latest
+#3 DONE 0.5s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.3-alpine
+#2 DONE 0.9s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [production 1/7] FROM docker.io/library/golang:1.24.3-alpine@sha256:b4f875e650466fa0fe62c6fd3f02517a392123eea85f1d7e69d85f780e4db1c1
+#5 resolve docker.io/library/golang:1.24.3-alpine@sha256:b4f875e650466fa0fe62c6fd3f02517a392123eea85f1d7e69d85f780e4db1c1 0.0s done
+#5 CACHED
+
+#6 [stage-1 1/5] FROM docker.io/library/alpine:latest@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715
+#6 resolve docker.io/library/alpine:latest@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 0.0s done
+#6 CACHED
+
+#7 [internal] load build context
+#7 transferring context: 3.82MB 2.1s done
+#7 DONE 2.1s
+
+#8 [stage-1 2/5] RUN apk --no-cache add ca-certificates tzdata
+#8 0.235 fetch https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+#8 1.536 fetch https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/APKINDEX.tar.gz
+#8 4.336 (1/2) Installing ca-certificates (20241121-r2)
+#8 4.497 (2/2) Installing tzdata (2025b-r0)
+#8 4.833 Executing busybox-1.37.0-r18.trigger
+#8 4.843 Executing ca-certificates-20241121-r2.trigger
+#8 4.873 OK: 8 MiB in 18 packages
+#8 DONE 4.9s
+
+#9 [production 2/7] RUN apk add --no-cache git
+#9 0.232 fetch https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz
+#9 1.146 fetch https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/APKINDEX.tar.gz
+#9 4.136 (1/12) Installing brotli-libs (1.1.0-r2)
+#9 4.480 (2/12) Installing c-ares (1.34.5-r0)
+#9 4.655 (3/12) Installing libunistring (1.3-r0)
+#9 ...
+
+#10 [stage-1 3/5] WORKDIR /root/
+#10 DONE 0.1s
+
+#9 [production 2/7] RUN apk add --no-cache git
+#9 5.707 (4/12) Installing libidn2 (2.3.7-r0)
+#9 5.889 (5/12) Installing nghttp2-libs (1.65.0-r0)
+#9 6.002 (6/12) Installing libpsl (0.21.5-r3)
+#9 6.104 (7/12) Installing zstd-libs (1.5.7-r0)
+#9 6.588 (8/12) Installing libcurl (8.14.1-r0)
+#9 7.038 (9/12) Installing libexpat (2.7.1-r0)
+#9 7.288 (10/12) Installing pcre2 (10.43-r1)
+#9 7.711 (11/12) Installing git (2.49.0-r0)
+#9 10.78 (12/12) Installing git-init-template (2.49.0-r0)
+#9 10.80 Executing busybox-1.37.0-r18.trigger
+#9 10.81 OK: 20 MiB in 29 packages
+#9 DONE 10.9s
+
+#11 [production 3/7] WORKDIR /app
+#11 DONE 0.0s
+
+#12 [production 4/7] COPY go.mod go.sum ./
+#12 DONE 0.0s
+
+#13 [production 5/7] RUN go mod download
+#13 DONE 1.2s
+
+#14 [production 6/7] COPY . .
+#14 DONE 3.0s
+
+#15 [production 7/7] RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cpq-main .
+#15 DONE 7.7s
+
+#16 [stage-1 4/5] COPY --from=production /app/cpq-main .
+#16 DONE 0.0s
+
+#17 [stage-1 5/5] RUN mkdir -p logs
+#17 DONE 0.1s
+
+#18 exporting to image
+#18 exporting layers
+#18 exporting layers 0.3s done
+#18 exporting manifest sha256:3ecdbb7d032b322d1510481932eb73576be58c189bdfff64feef4f060b0e4ef8 done
+#18 exporting config sha256:2de9595e68b90e7d3c967fe4d5f96a210c18d0107f9fadb2726fc0f81e89a5a6 done
+#18 exporting attestation manifest sha256:c98ee24215f2e8a1ef4647c5b7bdef7265134fae07bc3174a9c58cea4c39720b done
+#18 exporting manifest list sha256:8e54861f0923fac095b2de5f2e7123b507f5f9aa0873c3c15be492f2fa6bbce9 done
+#18 naming to docker.io/library/cpq-backend:latest done
+#18 unpacking to docker.io/library/cpq-backend:latest 0.1s done
+#18 DONE 0.5s

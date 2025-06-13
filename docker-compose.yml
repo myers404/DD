@@ -17,7 +17,8 @@ services:
     environment:
       POSTGRES_DB: cpq_system
       POSTGRES_USER: cpq_user
-      POSTGRES_PASSWORD: cpq_password_secure_2024
+      POSTGRES_PASSWORD: cpq_password
+#      PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     ports:
       - "5432:5432"
@@ -38,7 +39,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: production
     container_name: cpq-backend
     restart: unless-stopped
     environment:
@@ -47,11 +47,12 @@ services:
       DB_PORT: 5432
       DB_NAME: cpq_system
       DB_USER: cpq_user
-      DB_PASSWORD: cpq_password_secure_2024
+      DB_PASSWORD: cpq_password
       DB_SSL_MODE: disable
       DB_MAX_CONNECTIONS: 25
       DB_MAX_IDLE_CONNECTIONS: 5
       DB_CONNECTION_MAX_LIFETIME: 300
+#      DATABASE_URL: "postgres://cpq_user:cpq_password@postgres:5432/cpq_system?sslmode=disable"
 
       # Application Configuration
       APP_ENV: production
@@ -60,7 +61,7 @@ services:
       APP_LOG_LEVEL: info
 
       # JWT Configuration
-      JWT_SECRET: cpq_jwt_secret_key_2024_very_secure
+      JWT_SECRET: default-development-secret-change-in-production
       JWT_EXPIRY: 24h
       JWT_REFRESH_EXPIRY: 168h
 
@@ -85,11 +86,11 @@ services:
       - app_logs:/app/logs
     networks:
       - cpq-network
-    depends_on:
-      postgres:
-        condition: service_healthy
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      test: ["CMD-SHELL", "timeout 10s /app/main -health-check || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -113,37 +114,15 @@ services:
       - "443:443"
     networks:
       - cpq-network
-    depends_on:
-      cpq-backend:
-        condition: service_healthy
+#    depends_on:
+#      cpq-backend:
+#        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/nginx-health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
-
-  # Nginx Load Balancer (Optional - for production scaling)
-  nginx-lb:
-    image: nginx:alpine
-    container_name: cpq-load-balancer
-    restart: unless-stopped
-    ports:
-      - "8081:80"
-    volumes:
-      - ./nginx/load-balancer.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      - cpq-network
-    depends_on:
-      - cpq-frontend
-      - cpq-backend
-    profiles:
-      - production
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 
   # Database Admin - pgAdmin
   pgadmin:
@@ -169,29 +148,3 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
-
-# Development overrides
-x-development: &development
-  environment:
-    APP_ENV: development
-    APP_DEBUG: true
-    APP_LOG_LEVEL: debug
-    REACT_APP_ENV: development
-  volumes:
-    - .:/app
-    - /app/node_modules
-
-# Production optimizations
-x-production: &production
-  restart: unless-stopped
-  logging:
-    driver: "json-file"
-    options:
-      max-size: "10m"
-      max-file: "3"
-  deploy:
-    resources:
-      limits:
-        memory: 512M
-      reservations:
-        memory: 256M

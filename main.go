@@ -82,7 +82,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	server := createHTTPServer(config, cpqService, authService)
+	server := createHTTPServer(config, cpqService, nil)
 
 	// Start server
 	go func() {
@@ -126,7 +126,7 @@ func loadConfig() (*AppConfig, error) {
 		LogLevel:     "info",
 		DBHost:       "localhost",
 		DBPort:       5432,
-		DBName:       "cpq_db",
+		DBName:       "cpq_system",
 		DBUser:       "cpq_user",
 		DBPassword:   "cpq_password",
 		JWTExpiry:    24 * time.Hour,
@@ -241,29 +241,29 @@ func createHTTPServer(config *AppConfig, cpqService *CPQServiceDB, authService *
 	if config.EnableCORS {
 		router.Use(corsMiddleware)
 	}
-	router.Use(authService.AuthMiddleware)
+	// router.Use(authService.AuthMiddleware)
 
 	// Health and status endpoints (public)
-	router.HandleFunc("/health", healthHandler).Methods("GET")
+	router.HandleFunc("/health", healthHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/api/v1/health", healthHandler).Methods("GET", "OPTIONS")
-	router.HandleFunc("/api/v1/status", statusHandler).Methods("GET")
+	router.HandleFunc("/api/v1/status", statusHandler).Methods("GET", "OPTIONS")
 
 	// Authentication endpoints (public)
-	router.HandleFunc("/api/v1/auth/login", cpqService.loginHandler).Methods("POST")
+	router.HandleFunc("/api/v1/auth/login", cpqService.loginHandler).Methods("POST", "OPTIONS")
 
 	// CPQ endpoints (authenticated)
 	api := router.PathPrefix("/api/v1").Subrouter()
 
 	// Models
-	api.HandleFunc("/models", cpqService.listModelsHandler).Methods("GET")
-	api.HandleFunc("/models/{id}", cpqService.getModelHandler).Methods("GET")
+	api.HandleFunc("/models", cpqService.listModelsHandler).Methods("GET", "OPTIONS")
+	api.HandleFunc("/models/{id}", cpqService.getModelHandler).Methods("GET", "OPTIONS")
 
 	// Configurations
-	api.HandleFunc("/configurations", cpqService.createConfigurationHandler).Methods("POST")
-	api.HandleFunc("/configurations/{id}", cpqService.getConfigurationHandler).Methods("GET")
-	api.HandleFunc("/configurations/{id}/selections", cpqService.addSelectionHandler).Methods("POST")
-	api.HandleFunc("/configurations/{id}/validate", cpqService.validateConfigurationHandler).Methods("POST")
-	api.HandleFunc("/configurations/{id}/price", cpqService.calculatePriceHandler).Methods("POST")
+	api.HandleFunc("/configurations", cpqService.createConfigurationHandler).Methods("POST", "OPTIONS")
+	api.HandleFunc("/configurations/{id}", cpqService.getConfigurationHandler).Methods("GET", "OPTIONS")
+	api.HandleFunc("/configurations/{id}/selections", cpqService.addSelectionHandler).Methods("POST", "OPTIONS")
+	api.HandleFunc("/configurations/{id}/validate", cpqService.validateConfigurationHandler).Methods("POST", "OPTIONS")
+	api.HandleFunc("/configurations/{id}/price", cpqService.calculatePriceHandler).Methods("POST", "OPTIONS")
 
 	return &http.Server{
 		Addr:         ":" + config.Port,
@@ -490,9 +490,9 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-request-id")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)

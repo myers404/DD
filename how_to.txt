@@ -1,0 +1,3 @@
+Run Server: go run . -port 8080
+Run UI: cd ./frontend && npm run dev
+Run BD: docker-compose up -d postgres

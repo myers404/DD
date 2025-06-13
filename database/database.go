@@ -120,7 +120,7 @@ func (db *DB) GetModel(modelID string) (*cpq.Model, error) {
 // ListModels returns all active models
 func (db *DB) ListModels() ([]*cpq.Model, error) {
 	rows, err := db.Query(`
-		SELECT id, name, description, version, category, is_active, created_at, updated_at
+		SELECT id, name, description, version, is_active, created_at, updated_at
 		FROM models WHERE is_active = true ORDER BY name
 	`)
 	if err != nil {
@@ -132,8 +132,7 @@ func (db *DB) ListModels() ([]*cpq.Model, error) {
 	for rows.Next() {
 		model := &cpq.Model{}
 		err := rows.Scan(
-			&model.ID, &model.Name, &model.Description, &model.Version,
-			"", &model.IsActive, &model.CreatedAt, &model.UpdatedAt,
+			&model.ID, &model.Name, &model.Description, &model.Version, &model.IsActive, &model.CreatedAt, &model.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan model: %w", err)

@@ -2,7 +2,7 @@
 # Multi-stage build for Go CPQ application
 
 # Build stage
-FROM golang:1.24.3-alpine AS production
+FROM golang:1.24.3-alpine AS builder
 
 # Install git for go modules
 RUN apk add --no-cache git
@@ -32,7 +32,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /root/
 
 # Copy binary from builder stage
-COPY --from=production /app/main .
+COPY --from=builder /app/cpq-main .
 
 # Copy any static files if needed
 # COPY --from=builder /app/static ./static
