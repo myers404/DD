@@ -245,7 +245,7 @@ func createHTTPServer(config *AppConfig, cpqService *CPQServiceDB, authService *
 
 	// Health and status endpoints (public)
 	router.HandleFunc("/health", healthHandler).Methods("GET")
-	router.HandleFunc("/api/v1/health", healthHandler).Methods("GET")
+	router.HandleFunc("/api/v1/health", healthHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/api/v1/status", statusHandler).Methods("GET")
 
 	// Authentication endpoints (public)
