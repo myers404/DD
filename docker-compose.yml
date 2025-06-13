@@ -1,87 +1,197 @@
-# docker-compose.yml
+networks:
+  cpq-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  app_logs:
+    driver: local
 
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: cpq-postgres
+    container_name: cpq-database
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: cpq_db
+      POSTGRES_DB: cpq_system
       POSTGRES_USER: cpq_user
-      POSTGRES_PASSWORD: cpq_password
-      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_PASSWORD: cpq_password_secure_2024
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - cpq-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cpq_user -d cpq_db"]
+      test: ["CMD-SHELL", "pg_isready -U cpq_user -d cpq_system"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - cpq-network
+      start_period: 30s
 
-  # CPQ API Server
-  cpq-api:
+  # Go Backend API
+  cpq-backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: cpq-api
+      target: production
+    container_name: cpq-backend
+    restart: unless-stopped
     environment:
-      # Database
-      DATABASE_URL: "postgres://cpq_user:cpq_password@postgres:5432/cpq_db?sslmode=disable"
+      # Database Configuration
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: cpq_db
+      DB_NAME: cpq_system
       DB_USER: cpq_user
-      DB_PASSWORD: cpq_password
-      
-      # Server
-      PORT: 8080
-      ENVIRONMENT: development
-      
-      # Authentication
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      DB_PASSWORD: cpq_password_secure_2024
+      DB_SSL_MODE: disable
+      DB_MAX_CONNECTIONS: 25
+      DB_MAX_IDLE_CONNECTIONS: 5
+      DB_CONNECTION_MAX_LIFETIME: 300
+
+      # Application Configuration
+      APP_ENV: production
+      APP_PORT: 8080
+      APP_DEBUG: false
+      APP_LOG_LEVEL: info
+
+      # JWT Configuration
+      JWT_SECRET: cpq_jwt_secret_key_2024_very_secure
       JWT_EXPIRY: 24h
-      
-      # Features
-      ENABLE_CORS: true
-      LOG_LEVEL: info
-      
+      JWT_REFRESH_EXPIRY: 168h
+
+      # API Configuration
+      API_RATE_LIMIT: 100
+      API_RATE_WINDOW: 60
+      API_TIMEOUT: 30
+      API_MAX_REQUEST_SIZE: 10MB
+
+      # Performance Configuration
+      CACHE_ENABLED: true
+      CACHE_TTL: 300
+      METRICS_ENABLED: true
+
+      # CORS Configuration
+      CORS_ALLOWED_ORIGINS: "http://localhost,http://localhost:3000,http://localhost:80,http://localhost:8080"
+      CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,OPTIONS
+      CORS_ALLOWED_HEADERS: Origin,Content-Type,Accept,Authorization,X-Request-ID
     ports:
       - "8080:8080"
+    volumes:
+      - app_logs:/app/logs
+    networks:
+      - cpq-network
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # React Frontend (Built and served by Nginx)
+  cpq-frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: cpq-frontend
+    restart: unless-stopped
+    environment:
+      # Frontend Configuration
+      REACT_APP_API_URL: http://localhost:8080/api
+      REACT_APP_ENV: production
+      REACT_APP_VERSION: 1.0.0
+      REACT_APP_ENABLE_ANALYTICS: false
+    ports:
+      - "80:80"
+      - "443:443"
     networks:
       - cpq-network
-    restart: unless-stopped
+    depends_on:
+      cpq-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
-  # Optional: pgAdmin for database management
+  # Nginx Load Balancer (Optional - for production scaling)
+  nginx-lb:
+    image: nginx:alpine
+    container_name: cpq-load-balancer
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/load-balancer.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - cpq-network
+    depends_on:
+      - cpq-frontend
+      - cpq-backend
+    profiles:
+      - production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Database Admin - pgAdmin
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: cpq-pgadmin
+    restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@cpq.local
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_PASSWORD: cpq_pgadmin_2024
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
       - "5050:80"
-    depends_on:
-      - postgres
+    volumes:
+      - ./pgadmin:/var/lib/pgadmin
     networks:
       - cpq-network
+    depends_on:
+      - postgres
     profiles:
-      - admin # Only start with: docker-compose --profile admin up
+      - admin
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
 
-volumes:
-  postgres_data:
-    driver: local
+# Development overrides
+x-development: &development
+  environment:
+    APP_ENV: development
+    APP_DEBUG: true
+    APP_LOG_LEVEL: debug
+    REACT_APP_ENV: development
+  volumes:
+    - .:/app
+    - /app/node_modules
 
-networks:
-  cpq-network:
-    driver: bridge
+# Production optimizations
+x-production: &production
+  restart: unless-stopped
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+      reservations:
+        memory: 256M

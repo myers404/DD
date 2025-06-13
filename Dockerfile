@@ -2,7 +2,7 @@
 # Multi-stage build for Go CPQ application
 
 # Build stage
-FROM golang:1.24.3-alpine AS builder
+FROM golang:1.24.3-alpine AS production
 
 # Install git for go modules
 RUN apk add --no-cache git
@@ -20,7 +20,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cpq-main .
 
 # Final stage
 FROM alpine:latest
@@ -32,7 +32,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /root/
 
 # Copy binary from builder stage
-COPY --from=builder /app/cpq-main .
+COPY --from=production /app/main .
 
 # Copy any static files if needed
 # COPY --from=builder /app/static ./static
@@ -45,7 +45,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/api/v1/health || exit 1
 
 # Run the application
 CMD ["./cpq-main"]
