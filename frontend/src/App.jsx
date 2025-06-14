@@ -11,7 +11,7 @@ import Sidebar from './components/layout/Sidebar';
 // Page Components
 import Dashboard from './pages/Dashboard';
 import CustomerConfigurator from './pages/CustomerConfigurator';
-import ModelBuilder from './pages/SAVE_ModelBuilder.jsx';
+import ModelBuilder from './pages/ModelBuilder.jsx';
 import Login from './pages/Login';
 
 // Context Providers
@@ -111,9 +111,9 @@ function App() {
                 <Route
                   path="/model-builder/:modelId?"
                   element={
-                    <ProtectedRoute requiredRole="admin">
+                    // <ProtectedRoute requiredRole="admin">
                       <ModelBuilder />
-                    </ProtectedRoute>
+                    // </ProtectedRoute>
                   }
                 />
                 

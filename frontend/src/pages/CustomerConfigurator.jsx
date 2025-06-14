@@ -40,6 +40,7 @@ const CustomerConfigurator = () => {
     queryKey: ['model', modelId],
     queryFn: () => cpqApi.getModel(modelId),
     enabled: !!modelId,
+    retry: false,
   });
 
   // Create Configuration Mutation
@@ -176,6 +177,36 @@ const CustomerConfigurator = () => {
           </button>
         </div>
       </div>
+    );
+  }
+
+  if (!modelId) {
+    return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center p-8 max-w-md">
+            <CogIcon className="mx-auto h-12 w-12 text-blue-500 mb-4"/>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+              Select a Model to Configure
+            </h2>
+            <p className="text-gray-600 mb-6">
+              Choose a product model to start your configuration.
+            </p>
+            <div className="space-y-3">
+              <button
+                  onClick={() => navigate('/configure/sample-laptop')}
+                  className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Configure Business Laptop
+              </button>
+              <button
+                  onClick={() => navigate('/dashboard')}
+                  className="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
     );
   }
 

@@ -95,7 +95,7 @@ const Dashboard = () => {
     };
 
     loadDashboardData();
-  }, [loadModels]);
+  }, []);
 
   // Performance metrics
   const performanceMetrics = getPerformanceMetrics();

@@ -343,7 +343,9 @@ func loadModelsFromDirectory(service *CPQService, modelsPath string) error {
 func runServer(config *AppConfig, service *CPQService) error {
 	// Create server
 	serverConfig := createServerConfig(config)
-	server, err := NewServer(serverConfig, service)
+
+	// Create server without auth service (server/main_app.go doesn't use authentication)
+	server, err := NewServer(serverConfig, service, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}

@@ -31,35 +31,35 @@ func (s *Server) setupModelRoutes(router *mux.Router) {
 	handlers := NewModelHandlers(s.cpqService)
 
 	// Model CRUD operations
-	router.HandleFunc("", handlers.ListModels).Methods("GET")
-	router.HandleFunc("", handlers.CreateModel).Methods("POST")
-	router.HandleFunc("/{id}", handlers.GetModel).Methods("GET")
-	router.HandleFunc("/{id}", handlers.UpdateModel).Methods("PUT")
-	router.HandleFunc("/{id}", handlers.DeleteModel).Methods("DELETE")
+	router.HandleFunc("", handlers.ListModels).Methods("GET", "OPTIONS")
+	router.HandleFunc("", handlers.CreateModel).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.GetModel).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.UpdateModel).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.DeleteModel).Methods("DELETE", "OPTIONS")
 
 	// Model components
-	router.HandleFunc("/{id}/options", handlers.GetModelOptions).Methods("GET")
-	router.HandleFunc("/{id}/groups", handlers.GetModelGroups).Methods("GET")
-	router.HandleFunc("/{id}/rules", handlers.GetModelRules).Methods("GET")
-	router.HandleFunc("/{id}/pricing-rules", handlers.GetPricingRules).Methods("GET")
-	router.HandleFunc("/{id}/statistics", handlers.GetModelStatistics).Methods("GET")
+	router.HandleFunc("/{id}/options", handlers.GetModelOptions).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/groups", handlers.GetModelGroups).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/rules", handlers.GetModelRules).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/pricing-rules", handlers.GetPricingRules).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/statistics", handlers.GetModelStatistics).Methods("GET", "OPTIONS")
 
 	// Model building tools
-	router.HandleFunc("/{id}/validate", handlers.ValidateModel).Methods("POST")
-	router.HandleFunc("/{id}/conflicts", handlers.DetectConflicts).Methods("POST")
-	router.HandleFunc("/{id}/impact", handlers.AnalyzeImpact).Methods("POST")
-	router.HandleFunc("/{id}/priorities", handlers.ManagePriorities).Methods("POST")
-	router.HandleFunc("/{id}/quality", handlers.GetModelQuality).Methods("POST")
-	router.HandleFunc("/{id}/optimize", handlers.GetOptimizationRecommendations).Methods("POST")
+	router.HandleFunc("/{id}/validate", handlers.ValidateModel).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/conflicts", handlers.DetectConflicts).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/impact", handlers.AnalyzeImpact).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/priorities", handlers.ManagePriorities).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/quality", handlers.GetModelQuality).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/optimize", handlers.GetOptimizationRecommendations).Methods("POST", "OPTIONS")
 
 	// Rule management
-	router.HandleFunc("/{id}/rules/{rule_id}", handlers.GetRule).Methods("GET")
-	router.HandleFunc("/{id}/rules", handlers.AddRule).Methods("POST")
-	router.HandleFunc("/{id}/rules/{rule_id}", handlers.UpdateRule).Methods("PUT")
-	router.HandleFunc("/{id}/rules/{rule_id}", handlers.DeleteRule).Methods("DELETE")
-	router.HandleFunc("/{id}/rules/validate", handlers.ValidateRule).Methods("POST")
-	router.HandleFunc("/{id}/rules/test", handlers.TestRule).Methods("POST")
-	router.HandleFunc("/{id}/rules/conflicts", handlers.GetRuleConflicts).Methods("GET")
+	router.HandleFunc("/{id}/rules/{rule_id}", handlers.GetRule).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/rules", handlers.AddRule).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/rules/{rule_id}", handlers.UpdateRule).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}/rules/{rule_id}", handlers.DeleteRule).Methods("DELETE", "OPTIONS")
+	router.HandleFunc("/{id}/rules/validate", handlers.ValidateRule).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/rules/test", handlers.TestRule).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/rules/conflicts", handlers.GetRuleConflicts).Methods("GET", "OPTIONS")
 }
 
 // Model CRUD Operations
