@@ -13,6 +13,8 @@ import Dashboard from './pages/Dashboard';
 import CustomerConfigurator from './pages/CustomerConfigurator';
 import ModelBuilder from './pages/ModelBuilder.jsx';
 import Login from './pages/Login';
+import ModelSelection from './pages/ModelSelection'; // Add this import
+
 
 // Context Providers
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -108,12 +110,17 @@ function App() {
                 />
                 
                 {/* Model Builder - Admin Only */}
+                  <Route path="/model-builder" element={
+                      <ProtectedRoute requiredPermission="model_builder">
+                          <ModelSelection />
+                      </ProtectedRoute>
+                  } />
                 <Route
                   path="/model-builder/:modelId?"
                   element={
-                    // <ProtectedRoute requiredRole="admin">
+                    <ProtectedRoute requiredRole="admin">
                       <ModelBuilder />
-                    // </ProtectedRoute>
+                    </ProtectedRoute>
                   }
                 />
                 

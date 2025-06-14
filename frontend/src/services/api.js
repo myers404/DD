@@ -250,6 +250,11 @@ export const cpqApi = {
 
 // Model Builder API
 export const modelBuilderApi = {
+  validateModel: async (modelId) => {
+    const response = await apiClient.post(`/models/${modelId}/validate`);
+    return response.data;
+  },
+
   getModelStatistics: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/statistics`);
     return response.data;
