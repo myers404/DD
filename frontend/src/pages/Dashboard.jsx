@@ -16,8 +16,10 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfiguration } from '../contexts/ConfigurationContext';
+import ModelBuilderIntegrationTest from '../components/model-builder/ModelBuilderIntegrationTest';
 
 const Dashboard = () => {
+  const [showTesting, setShowTesting] = useState(false);
   const { user, hasPermission } = useAuth();
   const { 
     models, 
@@ -493,6 +495,35 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {process.env.NODE_ENV === 'development' && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-medium text-gray-900">
+                  🧪 Development Testing
+                </h2>
+                <button
+                    onClick={() => setShowTesting(!showTesting)}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
+                >
+                  {showTesting ? 'Hide Tests' : 'Show Integration Tests'}
+                </button>
+              </div>
+            </div>
+
+            {showTesting && (
+                <div className="p-6">
+                  <ModelBuilderIntegrationTest
+                      modelId="test-model-123" // Use any model ID for testing
+                      onTestComplete={(results) => {
+                        console.log('Test completed:', results);
+                      }}
+                  />
+                </div>
+            )}
+          </div>
       )}
     </div>
   );

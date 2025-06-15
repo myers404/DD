@@ -25,13 +25,13 @@ import { cpqApi, modelBuilderApi } from '../services/api';
 
 // Components
 import RuleEditor from '../components/model-builder/RuleEditor';
-import ConflictDetection from '../components/model-builder/ConflictDetection';
+import ConflictDetection from '../components/model-builder/ConflictDetection.jsx';
 import ImpactAnalysis from '../components/model-builder/ImpactAnalysis';
-import ModelValidation from '../components/model-builder/ModelValidation';
+import ModelValidation from '../components/model-builder/ModelValidation.jsx';
 import RulePriorityManager from '../components/model-builder/RulePriorityManager';
-import OptionsManager from '../components/model-builder/OptionsManager';
-import GroupsManager from '../components/model-builder/GroupsManager';
-import PricingRulesEditor from '../components/model-builder/PricingRulesEditor';
+import OptionsManager from '../components/model-builder/OptionsManager.jsx';
+import GroupsManager from '../components/model-builder/GroupsManager.jsx';
+import PricingRulesEditor from '../components/model-builder/PricingRulesEditor.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import Modal from '../components/common/Modal';
