@@ -1,5 +1,5 @@
-// frontend/src/services/api.js - Updated for Real JWT Authentication
-// Integrates with the new CPQ backend authentication endpoints
+// frontend/src/services/api.js - Enhanced version with complete endpoint coverage
+// Integrates with the CPQ backend and includes ALL endpoints needed by components
 
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
@@ -15,6 +15,26 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Performance monitoring utility
+const performanceMonitor = {
+  trackApiCall: (url, duration) => {
+    if (duration > 1000) {
+      console.warn(`Slow API call: ${url} took ${duration}ms`);
+    }
+
+    // Store performance data
+    const perfData = JSON.parse(localStorage.getItem('api_performance') || '[]');
+    perfData.push({ url, duration, timestamp: Date.now() });
+
+    // Keep only last 100 entries
+    if (perfData.length > 100) {
+      perfData.splice(0, perfData.length - 100);
+    }
+
+    localStorage.setItem('api_performance', JSON.stringify(perfData));
+  }
+};
 
 // Request interceptor to add auth token
 apiClient.interceptors.request.use(
@@ -72,7 +92,7 @@ apiClient.interceptors.response.use(
         // Handle other HTTP errors
         switch (status) {
           case 400:
-            toast.error(data.error?.message || 'Invalid request');
+            // Don't show toast for validation errors, let components handle them
             break;
           case 403:
             toast.error('Access denied');
@@ -90,100 +110,72 @@ apiClient.interceptors.response.use(
             toast.error('Server error. Please try again later.');
             break;
           default:
-            toast.error(data.error?.message || 'An error occurred');
+            toast.error(`Request failed with status ${status}`);
         }
 
-        // Return structured error
-        const apiError = new Error(data.error?.message || 'API Error');
+        // Create standardized error object
+        const apiError = new Error(data?.error?.message || data?.message || `HTTP ${status} Error`);
         apiError.status = status;
-        apiError.code = data.error?.code;
-        apiError.details = data.error?.details;
+        apiError.code = data?.error?.code || 'API_ERROR';
+        apiError.details = data?.error?.details || {};
+        apiError.validationErrors = data?.validationErrors || [];
+
         return Promise.reject(apiError);
       } else if (request) {
         // Network error
         toast.error('Network error. Please check your connection.');
-        return Promise.reject(new Error('Network error'));
+        const networkError = new Error('Network error - no response received');
+        networkError.code = 'NETWORK_ERROR';
+        return Promise.reject(networkError);
       } else {
-        // Other errors
-        toast.error('An unexpected error occurred');
-        return Promise.reject(error);
+        // Request setup error
+        const setupError = new Error('Request configuration error');
+        setupError.code = 'CONFIG_ERROR';
+        return Promise.reject(setupError);
       }
     }
 );
 
-// Authentication API - Updated for real JWT endpoints
+// Authentication API
 export const authApi = {
   login: async (credentials) => {
-    try {
-      const response = await apiClient.post('/auth/login', credentials);
+    const response = await apiClient.post('/auth/login', credentials);
 
-      // Store token and user data
-      if (response.data.success && response.data.data.token) {
-        localStorage.setItem('auth_token', response.data.data.token);
-        localStorage.setItem('user_data', JSON.stringify(response.data.data.user));
-      }
-
-      return response.data;
-    } catch (error) {
-      // Re-throw with additional context
-      throw error;
+    // Store token and user data
+    if (response.data.token) {
+      localStorage.setItem('auth_token', response.data.token);
+      localStorage.setItem('user_data', JSON.stringify(response.data.user));
     }
-  },
 
-  validateToken: async (token) => {
-    try {
-      const response = await apiClient.post('/auth/validate', { token });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  refreshToken: async () => {
-    try {
-      const response = await apiClient.post('/auth/refresh');
-
-      // Update stored token
-      if (response.data.success && response.data.data.token) {
-        localStorage.setItem('auth_token', response.data.data.token);
-      }
-
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  getUserInfo: async () => {
-    try {
-      const response = await apiClient.get('/auth/user');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    return response.data;
   },
 
   logout: async () => {
     try {
-      // Clear local storage first
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-
-      // Optional: call logout endpoint if you add one
-      // const response = await apiClient.post('/auth/logout');
-      // return response.data;
-
-      return { success: true };
+      await apiClient.post('/auth/logout');
     } catch (error) {
-      // Even if API call fails, clear local storage
+      // Ignore logout errors
+    } finally {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user_data');
-      throw error;
     }
   },
+
+  getCurrentUser: async () => {
+    const response = await apiClient.get('/auth/me');
+    return response.data;
+  },
+
+  refreshToken: async () => {
+    const response = await apiClient.post('/auth/refresh');
+    if (response.data.token) {
+      localStorage.setItem('auth_token', response.data.token);
+    }
+    return response.data;
+  }
 };
 
-// CPQ Configuration API
+// Core CPQ API
 export const cpqApi = {
   // Models
   getModels: async () => {
@@ -211,19 +203,66 @@ export const cpqApi = {
     return response.data;
   },
 
-  validateModel: async (modelId) => {
-    const response = await apiClient.post(`/models/${modelId}/validate`);
+  // Model Groups
+  getModelGroups: async (modelId) => {
+    const response = await apiClient.get(`/models/${modelId}/groups`);
+    return response.data;
+  },
+
+  getModelGroupsWithOptions: async (modelId) => {
+    const response = await apiClient.get(`/models/${modelId}/groups?include=options`);
+    return response.data;
+  },
+
+  createGroup: async (modelId, groupData) => {
+    const response = await apiClient.post(`/models/${modelId}/groups`, groupData);
+    return response.data;
+  },
+
+  updateGroup: async (modelId, groupId, groupData) => {
+    const response = await apiClient.put(`/models/${modelId}/groups/${groupId}`, groupData);
+    return response.data;
+  },
+
+  deleteGroup: async (modelId, groupId) => {
+    const response = await apiClient.delete(`/models/${modelId}/groups/${groupId}`);
+    return response.data;
+  },
+
+  // Model Options
+  getModelOptions: async (modelId) => {
+    const response = await apiClient.get(`/models/${modelId}/options`);
+    return response.data;
+  },
+
+  createOption: async (modelId, optionData) => {
+    const response = await apiClient.post(`/models/${modelId}/options`, optionData);
+    return response.data;
+  },
+
+  updateOption: async (modelId, optionId, optionData) => {
+    const response = await apiClient.put(`/models/${modelId}/options/${optionId}`, optionData);
+    return response.data;
+  },
+
+  deleteOption: async (modelId, optionId) => {
+    const response = await apiClient.delete(`/models/${modelId}/options/${optionId}`);
     return response.data;
   },
 
   // Configurations
-  createConfiguration: async (configData) => {
-    const response = await apiClient.post('/configurations', configData);
+  getConfigurations: async (params = {}) => {
+    const response = await apiClient.get('/configurations', { params });
     return response.data;
   },
 
   getConfiguration: async (configId) => {
     const response = await apiClient.get(`/configurations/${configId}`);
+    return response.data;
+  },
+
+  createConfiguration: async (configData) => {
+    const response = await apiClient.post('/configurations', configData);
     return response.data;
   },
 
@@ -237,46 +276,75 @@ export const cpqApi = {
     return response.data;
   },
 
+  // Configuration Validation
   validateConfiguration: async (configId, modelId) => {
-    const response = await apiClient.post(`/configurations/${configId}/validate?model_id=${modelId}`);
+    const response = await apiClient.post(`/configurations/${configId}/validate`, {
+      modelId
+    });
     return response.data;
   },
 
-  calculatePrice: async (configId, modelId) => {
-    const response = await apiClient.post(`/configurations/${configId}/price?model_id=${modelId}`);
+  // Configuration Pricing
+  priceConfiguration: async (configId, modelId) => {
+    const response = await apiClient.post(`/configurations/${configId}/price`, {
+      modelId
+    });
     return response.data;
   },
+
+  // Quick validation without saving
+  validateSelections: async (modelId, selections) => {
+    const response = await apiClient.post(`/models/${modelId}/validate`, {
+      selections
+    });
+    return response.data;
+  },
+
+  // Quick pricing without saving
+  calculatePrice: async (modelId, selections, context = {}) => {
+    const response = await apiClient.post(`/models/${modelId}/price`, {
+      selections,
+      context
+    });
+    return response.data;
+  }
 };
 
 // Model Builder API
 export const modelBuilderApi = {
-  validateModel: async (modelId) => {
-    const response = await apiClient.post(`/models/${modelId}/validate`);
-    return response.data;
-  },
-
+  // Model Statistics
   getModelStatistics: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/statistics`);
     return response.data;
   },
 
+  // Conflict Detection
   detectConflicts: async (modelId) => {
     const response = await apiClient.post(`/models/${modelId}/conflicts`);
     return response.data;
   },
 
+  // Impact Analysis
   analyzeImpact: async (modelId, changeData) => {
     const response = await apiClient.post(`/models/${modelId}/impact`, changeData);
     return response.data;
   },
 
+  // Model Quality
   getModelQuality: async (modelId) => {
     const response = await apiClient.post(`/models/${modelId}/quality`);
     return response.data;
   },
 
+  // Optimization Recommendations
   getOptimizationRecommendations: async (modelId) => {
     const response = await apiClient.post(`/models/${modelId}/optimize`);
+    return response.data;
+  },
+
+  // Rules Management
+  getModelRules: async (modelId) => {
+    const response = await apiClient.get(`/models/${modelId}/rules`);
     return response.data;
   },
 
@@ -299,6 +367,33 @@ export const modelBuilderApi = {
     const response = await apiClient.post(`/models/${modelId}/rules/validate`, ruleData);
     return response.data;
   },
+
+  // Pricing Rules
+  getPricingRules: async (modelId) => {
+    const response = await apiClient.get(`/models/${modelId}/pricing-rules`);
+    return response.data;
+  },
+
+  createPricingRule: async (modelId, ruleData) => {
+    const response = await apiClient.post(`/models/${modelId}/pricing-rules`, ruleData);
+    return response.data;
+  },
+
+  updatePricingRule: async (modelId, ruleId, ruleData) => {
+    const response = await apiClient.put(`/models/${modelId}/pricing-rules/${ruleId}`, ruleData);
+    return response.data;
+  },
+
+  deletePricingRule: async (modelId, ruleId) => {
+    const response = await apiClient.delete(`/models/${modelId}/pricing-rules/${ruleId}`);
+    return response.data;
+  },
+
+  // Rule Priority Management
+  updateRulePriorities: async (modelId, priorities) => {
+    const response = await apiClient.put(`/models/${modelId}/rules/priorities`, { priorities });
+    return response.data;
+  }
 };
 
 // Pricing API
@@ -327,6 +422,35 @@ export const pricingApi = {
     const response = await apiClient.post('/pricing/bulk-calculate', bulkData);
     return response.data;
   },
+
+  // Pricing analysis
+  analyzePricingImpact: async (modelId, changes) => {
+    const response = await apiClient.post(`/pricing/analyze-impact/${modelId}`, changes);
+    return response.data;
+  }
+};
+
+// Analytics API
+export const analyticsApi = {
+  getModelAnalytics: async (modelId, timeRange = '30d') => {
+    const response = await apiClient.get(`/analytics/models/${modelId}?range=${timeRange}`);
+    return response.data;
+  },
+
+  getConfigurationAnalytics: async (timeRange = '30d') => {
+    const response = await apiClient.get(`/analytics/configurations?range=${timeRange}`);
+    return response.data;
+  },
+
+  getPricingAnalytics: async (timeRange = '30d') => {
+    const response = await apiClient.get(`/analytics/pricing?range=${timeRange}`);
+    return response.data;
+  },
+
+  getPerformanceMetrics: async () => {
+    const response = await apiClient.get('/analytics/performance');
+    return response.data;
+  }
 };
 
 // System API
@@ -344,7 +468,7 @@ export const systemApi = {
   getVersion: async () => {
     const response = await apiClient.get('/version');
     return response.data;
-  },
+  }
 };
 
 // Search API
@@ -363,7 +487,7 @@ export const searchApi = {
   searchConfigurations: async (query) => {
     const response = await apiClient.get(`/search/configurations?q=${query}`);
     return response.data;
-  },
+  }
 };
 
 // Utility functions
@@ -380,77 +504,97 @@ export const apiUtils = {
 
   // Check if error is validation related
   isValidationError: (error) => {
-    return error.status === 422;
+    return error.status === 422 || error.status === 400;
   },
 
-  // Format error message for display
+  // Get validation errors from API response
+  getValidationErrors: (error) => {
+    return error.validationErrors || [];
+  },
+
+  // Format error for display
   formatErrorMessage: (error) => {
-    if (error.details) {
-      return `${error.message}: ${error.details}`;
-    }
-    return error.message || 'An unknown error occurred';
+    if (typeof error === 'string') return error;
+    if (error.message) return error.message;
+    if (error.status) return `Request failed with status ${error.status}`;
+    return 'An unexpected error occurred';
   },
 
-  // Extract validation errors for form display
-  extractValidationErrors: (error) => {
-    if (error.status === 422 && error.details) {
-      return error.details;
-    }
-    return {};
+  // Performance utilities
+  getPerformanceData: () => {
+    return JSON.parse(localStorage.getItem('api_performance') || '[]');
   },
 
-  // Create request timeout promise
-  withTimeout: (promise, timeoutMs = 10000) => {
-    const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
-    );
-    return Promise.race([promise, timeout]);
+  clearPerformanceData: () => {
+    localStorage.removeItem('api_performance');
   },
+
+  getAverageResponseTime: () => {
+    const data = JSON.parse(localStorage.getItem('api_performance') || '[]');
+    if (data.length === 0) return 0;
+
+    const total = data.reduce((sum, entry) => sum + entry.duration, 0);
+    return Math.round(total / data.length);
+  }
 };
 
-// Performance monitoring
-export const performanceMonitor = {
-  // Track API call performance
-  trackApiCall: (url, duration) => {
-    if (duration > 200) {
-      console.warn(`API Performance Warning: ${url} took ${duration}ms (target: <200ms)`);
+// Request queue for batch operations
+class RequestQueue {
+  constructor() {
+    this.queue = [];
+    this.processing = false;
+    this.batchSize = 5;
+    this.batchDelay = 100;
+  }
+
+  add(request) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ request, resolve, reject });
+      this.process();
+    });
+  }
+
+  async process() {
+    if (this.processing || this.queue.length === 0) return;
+
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const batch = this.queue.splice(0, this.batchSize);
+
+      const promises = batch.map(async ({ request, resolve, reject }) => {
+        try {
+          const result = await request();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      await Promise.allSettled(promises);
+
+      if (this.queue.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, this.batchDelay));
+      }
     }
 
-    // Store metrics for dashboard
-    const metrics = JSON.parse(localStorage.getItem('api_metrics') || '{}');
-    if (!metrics[url]) {
-      metrics[url] = { calls: 0, totalTime: 0, avgTime: 0, slowCalls: 0 };
-    }
+    this.processing = false;
+  }
+}
 
-    metrics[url].calls++;
-    metrics[url].totalTime += duration;
-    metrics[url].avgTime = metrics[url].totalTime / metrics[url].calls;
+// Export request queue instance
+export const requestQueue = new RequestQueue();
 
-    if (duration > 200) {
-      metrics[url].slowCalls++;
-    }
-
-    localStorage.setItem('api_metrics', JSON.stringify(metrics));
-  },
-
-  // Get performance metrics
-  getMetrics: () => {
-    return JSON.parse(localStorage.getItem('api_metrics') || '{}');
-  },
-
-  // Clear metrics
-  clearMetrics: () => {
-    localStorage.removeItem('api_metrics');
-  },
-};
-
+// Export everything
 export default {
   authApi,
   cpqApi,
   modelBuilderApi,
   pricingApi,
-  searchApi,
+  analyticsApi,
   systemApi,
+  searchApi,
   apiUtils,
-  performanceMonitor,
+  requestQueue,
+  performanceMonitor
 };

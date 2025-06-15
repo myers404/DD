@@ -1,4 +1,5 @@
-// Updated ModelBuilder.jsx with proper save functionality
+// frontend/src/pages/ModelBuilder.jsx
+// Fixed version - production-ready with proper imports and real API integration
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -17,21 +18,25 @@ import {
   TrashIcon,
   PencilIcon,
   CurrencyDollarIcon,
-  ArrowPathIcon,
+  ArrowLeftIcon,
+  InformationCircleIcon,
+  PlayIcon,
+  ClockIcon,
+  UserGroupIcon
 } from '@heroicons/react/24/outline';
 
 // API Functions
 import { cpqApi, modelBuilderApi } from '../services/api';
 
-// Components
+// Fixed Components - Now using .jsx versions
 import RuleEditor from '../components/model-builder/RuleEditor';
-import ConflictDetection from '../components/model-builder/ConflictDetection.jsx';
+import ConflictDetection from '../components/model-builder/ConflictDetection';
 import ImpactAnalysis from '../components/model-builder/ImpactAnalysis';
-import ModelValidation from '../components/model-builder/ModelValidation.jsx';
+import ModelValidation from '../components/model-builder/ModelValidation';
 import RulePriorityManager from '../components/model-builder/RulePriorityManager';
-import OptionsManager from '../components/model-builder/OptionsManager.jsx';
-import GroupsManager from '../components/model-builder/GroupsManager.jsx';
-import PricingRulesEditor from '../components/model-builder/PricingRulesEditor.jsx';
+import OptionsManager from '../components/model-builder/OptionsManager';  // Fixed version
+import GroupsManager from '../components/model-builder/GroupsManager';    // Fixed version
+import PricingRulesEditor from '../components/model-builder/PricingRulesEditor';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import Modal from '../components/common/Modal';
@@ -41,487 +46,582 @@ const ModelBuilder = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // State Management
+  // Local state
   const [activeTab, setActiveTab] = useState('overview');
-  const [isEditing, setIsEditing] = useState(false);
   const [showRuleEditor, setShowRuleEditor] = useState(false);
   const [selectedRule, setSelectedRule] = useState(null);
   const [validationResults, setValidationResults] = useState(null);
   const [conflictResults, setConflictResults] = useState(null);
   const [impactResults, setImpactResults] = useState(null);
 
-  // NEW: Track model changes and save state
-  const [modelChanges, setModelChanges] = useState({});
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
-  // Fetch Model Data
-  const { data: model, isLoading: modelLoading, error: modelError, refetch } = useQuery({
+  // Fetch current model
+  const {
+    data: model,
+    isLoading: modelLoading,
+    error: modelError
+  } = useQuery({
     queryKey: ['model', modelId],
     queryFn: () => cpqApi.getModel(modelId),
     enabled: !!modelId,
-    onSuccess: (data) => {
-      // Reset changes when fresh model is loaded
-      setModelChanges({});
-      setHasUnsavedChanges(false);
-    }
+    refetchOnWindowFocus: false
   });
 
-  // Get the current model with any pending changes applied
-  const currentModel = {
-    ...(model?.data || model || {}),
-    ...modelChanges
-  };
+  // Fetch all models for navigation
+  const {
+    data: models = [],
+    isLoading: modelsLoading
+  } = useQuery({
+    queryKey: ['models'],
+    queryFn: () => cpqApi.getModels(),
+    refetchOnWindowFocus: false
+  });
 
-  // Model Validation Mutation (silent fallback)
+  // Model statistics query
+  const {
+    data: modelStats,
+    isLoading: statsLoading
+  } = useQuery({
+    queryKey: ['model-stats', modelId],
+    queryFn: () => modelBuilderApi.getModelStatistics(modelId),
+    enabled: !!modelId,
+    refetchOnWindowFocus: false
+  });
+
+  // Mutations for various operations
   const validateModelMutation = useMutation({
-    mutationFn: async (modelId) => {
-      try {
-        return await modelBuilderApi.validateModel(modelId);
-      } catch (error) {
-        return {
-          isValid: true,
-          issues: [],
-          qualityScore: 85,
-          recommendations: ['Consider adding more constraint rules', 'Add volume pricing tiers'],
-          timestamp: new Date().toISOString()
-        };
-      }
-    },
+    mutationFn: (id) => modelBuilderApi.getModelQuality(id),
     onSuccess: (data) => {
       setValidationResults(data);
-    },
-  });
-
-  // NEW: Save Model Mutation
-  const saveModelMutation = useMutation({
-    mutationFn: async () => {
-      if (!hasUnsavedChanges) {
-        return currentModel;
-      }
-
-      console.log('💾 Saving model changes:', modelChanges);
-
-      // Call the UPDATE endpoint, not validate
-      const response = await cpqApi.updateModel(modelId, currentModel);
-      return response;
-    },
-    onSuccess: (data) => {
-      console.log('✅ Model saved successfully:', data);
-
-      // Clear unsaved changes
-      setModelChanges({});
-      setHasUnsavedChanges(false);
-
-      // Refresh model data from server
-      refetch();
-
-      toast.success('Model saved successfully!');
+      toast.success('Model validation completed!');
     },
     onError: (error) => {
-      console.error('❌ Save failed:', error);
-      toast.error(`Failed to save model: ${error.message}`);
+      toast.error(error.message || 'Failed to validate model');
     }
   });
 
-  // NEW: Function to track model changes
-  const updateModel = useCallback((changes) => {
-    console.log('📝 Model changes detected:', changes);
+  const detectConflictsMutation = useMutation({
+    mutationFn: (id) => modelBuilderApi.detectConflicts(id),
+    onSuccess: (data) => {
+      setConflictResults(data);
+      if (data.conflicts?.length > 0) {
+        toast.warning(`Found ${data.conflicts.length} conflicts`);
+      } else {
+        toast.success('No conflicts detected!');
+      }
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Failed to detect conflicts');
+    }
+  });
 
-    setModelChanges(prev => ({
-      ...prev,
-      ...changes
-    }));
-    setHasUnsavedChanges(true);
+  const analyzeImpactMutation = useMutation({
+    mutationFn: ({ modelId, changes }) => modelBuilderApi.analyzeImpact(modelId, changes),
+    onSuccess: (data) => {
+      setImpactResults(data);
+      toast.success('Impact analysis completed!');
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Failed to analyze impact');
+    }
+  });
+
+  // Auto-run validation when model changes
+  useEffect(() => {
+    if (modelId && model) {
+      // Auto-validate on load
+      setTimeout(() => {
+        validateModelMutation.mutate(modelId);
+        detectConflictsMutation.mutate(modelId);
+      }, 1000);
+    }
+  }, [modelId, model]);
+
+  // Handle rule operations
+  const handleRuleCreate = useCallback(() => {
+    setSelectedRule(null);
+    setShowRuleEditor(true);
   }, []);
 
-  // NEW: Save handler
-  const handleSave = useCallback(async () => {
-    if (!hasUnsavedChanges) {
-      toast.info('No changes to save');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      await saveModelMutation.mutateAsync();
-    } finally {
-      setIsSaving(false);
-    }
-  }, [hasUnsavedChanges, saveModelMutation]);
-
-  // Handle rule creation/editing
-  const handleRuleEdit = useCallback((rule = null) => {
+  const handleRuleEdit = useCallback((rule) => {
     setSelectedRule(rule);
     setShowRuleEditor(true);
   }, []);
 
-  // Handle rule save - NOW ACTUALLY SAVES TO SERVER
-  const handleRuleSave = useCallback((ruleData) => {
-    console.log('💾 Saving rule:', ruleData);
-
-    const updatedRules = selectedRule
-        ? currentModel.rules?.map(r => r.id === selectedRule.id ? { ...r, ...ruleData } : r) || []
-        : [...(currentModel.rules || []), { ...ruleData, id: `rule_${Date.now()}` }];
-
-    // Update model with new rules
-    updateModel({ rules: updatedRules });
-
-    setShowRuleEditor(false);
-    setSelectedRule(null);
-    toast.success('Rule updated! Remember to save the model.');
-  }, [currentModel, selectedRule, updateModel]);
-
-  // Handle rule deletion - NOW ACTUALLY SAVES TO SERVER
-  const handleRuleDelete = useCallback((ruleId) => {
-    if (window.confirm('Are you sure you want to delete this rule?')) {
-      console.log('🗑️ Deleting rule:', ruleId);
-
-      const updatedRules = currentModel.rules?.filter(r => r.id !== ruleId) || [];
-
-      // Update model without the deleted rule
-      updateModel({ rules: updatedRules });
-
-      toast.success('Rule deleted! Remember to save the model.');
-    }
-  }, [currentModel, updateModel]);
-
-  // Auto-run validation when model changes
-  useEffect(() => {
-    if (model && modelId && !validateModelMutation.isLoading) {
-      validateModelMutation.mutate(modelId);
-    }
-  }, [model, modelId]);
-
-  // Manual validation handler
-  const handleManualValidation = useCallback(() => {
-    validateModelMutation.mutate(modelId, {
-      onSuccess: (data) => {
-        if (data.isValid) {
-          toast.success('Model validation passed!');
-        } else {
-          toast.error(`Model has ${data.issues?.length || 0} validation issues`);
-        }
-      },
-      onError: (error) => {
-        toast.error(`Validation failed: ${error.message}`);
-      },
-    });
-  }, [modelId, validateModelMutation]);
-
-  // Warn about unsaved changes when leaving
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (hasUnsavedChanges) {
-        e.preventDefault();
-        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+  const handleRuleSave = useCallback(async (ruleData) => {
+    try {
+      if (selectedRule) {
+        // Update existing rule
+        await modelBuilderApi.updateRule(modelId, selectedRule.id, ruleData);
+        toast.success('Rule updated successfully!');
+      } else {
+        // Create new rule
+        await modelBuilderApi.addRule(modelId, ruleData);
+        toast.success('Rule created successfully!');
       }
-    };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges]);
+      // Refresh data
+      queryClient.invalidateQueries(['model', modelId]);
 
-  // Tab definitions
+      // Re-run analysis
+      detectConflictsMutation.mutate(modelId);
+      analyzeImpactMutation.mutate({
+        modelId,
+        changes: [{ type: selectedRule ? 'update' : 'create', rule: ruleData }]
+      });
+
+      setShowRuleEditor(false);
+      setSelectedRule(null);
+    } catch (error) {
+      toast.error(error.message || 'Failed to save rule');
+    }
+  }, [modelId, selectedRule, queryClient, detectConflictsMutation, analyzeImpactMutation]);
+
+  const handleRuleDelete = useCallback(async (ruleId) => {
+    if (!window.confirm('Are you sure you want to delete this rule?')) {
+      return;
+    }
+
+    try {
+      await modelBuilderApi.deleteRule(modelId, ruleId);
+
+      // Refresh data
+      queryClient.invalidateQueries(['model', modelId]);
+
+      // Re-run analysis
+      detectConflictsMutation.mutate(modelId);
+      analyzeImpactMutation.mutate({
+        modelId,
+        changes: [{ type: 'delete', ruleId }]
+      });
+
+      toast.success('Rule deleted successfully!');
+    } catch (error) {
+      toast.error(error.message || 'Failed to delete rule');
+    }
+  }, [modelId, queryClient, detectConflictsMutation, analyzeImpactMutation]);
+
+  // Tab Configuration
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: DocumentTextIcon },
-    { id: 'options', label: 'Options', icon: CogIcon },
-    { id: 'groups', label: 'Groups', icon: WrenchScrewdriverIcon },
-    { id: 'rules', label: 'Rules', icon: ExclamationTriangleIcon },
-    { id: 'pricing', label: 'Pricing', icon: CurrencyDollarIcon },
-    { id: 'validation', label: 'Validation', icon: CheckCircleIcon },
-    { id: 'conflicts', label: 'Conflicts', icon: BeakerIcon },
-    { id: 'impact', label: 'Impact', icon: ChartBarIcon },
-    { id: 'priorities', label: 'Priorities', icon: ChartBarIcon },
+    { id: 'overview', name: 'Overview', icon: DocumentTextIcon, description: 'Model summary and statistics' },
+    { id: 'options', name: 'Options', icon: CogIcon, description: 'Manage configuration options' },
+    { id: 'groups', name: 'Groups', icon: UserGroupIcon, description: 'Organize options into groups' },
+    { id: 'rules', name: 'Rules', icon: WrenchScrewdriverIcon, description: 'Define business rules' },
+    { id: 'pricing', name: 'Pricing', icon: CurrencyDollarIcon, description: 'Configure pricing rules' },
+    { id: 'validation', name: 'Validation', icon: CheckCircleIcon, description: 'Model quality analysis' },
+    { id: 'conflicts', name: 'Conflicts', icon: ExclamationTriangleIcon, description: 'Detect rule conflicts' },
+    { id: 'impact', name: 'Impact', icon: BeakerIcon, description: 'Analyze change impacts' },
   ];
 
-  // Loading states
-  if (modelLoading) {
+  // Get current tab info
+  const currentTab = tabs.find(tab => tab.id === activeTab);
+
+  // Loading States
+  if (modelLoading || modelsLoading) {
     return (
-        <div className="flex justify-center items-center h-64">
-          <LoadingSpinner size="large" />
+        <div className="min-h-screen flex items-center justify-center">
+          <LoadingSpinner size="large" message="Loading model builder..." />
         </div>
     );
   }
 
   if (modelError) {
     return (
-        <div className="text-center py-12">
-          <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">Error loading model</h3>
-          <p className="mt-1 text-sm text-gray-500">{modelError.message}</p>
-          <div className="mt-6">
-            <button
-                onClick={() => navigate('/model-builder')}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-            >
-              Back to Models
-            </button>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center p-8 max-w-md">
+            <ExclamationTriangleIcon className="mx-auto h-16 w-16 text-red-500 mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Model Not Found</h2>
+            <p className="text-gray-600 mb-6">
+              {modelError.message || 'The requested model could not be loaded.'}
+            </p>
+            <div className="space-y-3">
+              <button
+                  onClick={() => navigate('/dashboard')}
+                  className="w-full bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Return to Dashboard
+              </button>
+              <button
+                  onClick={() => window.location.reload()}
+                  className="w-full bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
           </div>
         </div>
     );
   }
 
-  if (!currentModel.id) {
-    return (
-        <div className="text-center py-12">
-          <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">Model not found</h3>
-          <p className="mt-1 text-sm text-gray-500">The model you're looking for doesn't exist.</p>
-          <div className="mt-6">
+  // Overview Tab Content
+  const OverviewTab = () => (
+      <div className="space-y-6">
+        {/* Model Information */}
+        <div className="bg-white rounded-lg border p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <InformationCircleIcon className="w-5 h-5 mr-2 text-blue-600" />
+            Model Information
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div>
+              <label className="text-sm font-medium text-gray-500">Model Name</label>
+              <p className="text-lg font-medium text-gray-900">{model?.name}</p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-500">Version</label>
+              <p className="text-lg font-medium text-gray-900">{model?.version || '1.0'}</p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-500">Status</label>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  model?.active
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-gray-100 text-gray-800'
+              }`}>
+              {model?.active ? 'Active' : 'Inactive'}
+            </span>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-500">Created</label>
+              <p className="text-sm text-gray-700">
+                {model?.createdAt ? new Date(model.createdAt).toLocaleDateString() : 'N/A'}
+              </p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-500">Last Modified</label>
+              <p className="text-sm text-gray-700">
+                {model?.updatedAt ? new Date(model.updatedAt).toLocaleDateString() : 'N/A'}
+              </p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-500">Model ID</label>
+              <p className="text-xs text-gray-500 font-mono">{modelId}</p>
+            </div>
+          </div>
+
+          {model?.description && (
+              <div className="mt-4 pt-4 border-t">
+                <label className="text-sm font-medium text-gray-500">Description</label>
+                <p className="text-gray-700 mt-1">{model.description}</p>
+              </div>
+          )}
+        </div>
+
+        {/* Statistics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg border p-4">
+            <div className="flex items-center">
+              <CogIcon className="w-8 h-8 text-blue-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-500">Options</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {statsLoading ? '-' : modelStats?.optionsCount || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-4">
+            <div className="flex items-center">
+              <UserGroupIcon className="w-8 h-8 text-green-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-500">Groups</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {statsLoading ? '-' : modelStats?.groupsCount || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-4">
+            <div className="flex items-center">
+              <WrenchScrewdriverIcon className="w-8 h-8 text-purple-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-500">Rules</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {statsLoading ? '-' : modelStats?.rulesCount || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-4">
+            <div className="flex items-center">
+              <ChartBarIcon className="w-8 h-8 text-orange-600" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-500">Configurations</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {statsLoading ? '-' : modelStats?.configurationsCount || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Health Status */}
+        <div className="bg-white rounded-lg border p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <CheckCircleIcon className="w-5 h-5 mr-2 text-green-600" />
+            Model Health
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <div className={`text-2xl font-bold ${
+                  validationResults?.isValid ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {validationResults?.isValid ? '✓' : '✗'}
+              </div>
+              <p className="text-sm text-gray-600 mt-1">Validation</p>
+            </div>
+
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <div className={`text-2xl font-bold ${
+                  conflictResults?.conflicts?.length === 0 ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {conflictResults?.conflicts?.length || 0}
+              </div>
+              <p className="text-sm text-gray-600 mt-1">Conflicts</p>
+            </div>
+
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">
+                {impactResults?.score?.toFixed(1) || 'N/A'}
+              </div>
+              <p className="text-sm text-gray-600 mt-1">Quality Score</p>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="mt-6 flex flex-wrap gap-3">
             <button
-                onClick={() => navigate('/model-builder')}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                onClick={() => validateModelMutation.mutate(modelId)}
+                disabled={validateModelMutation.isLoading}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              Back to Models
+              {validateModelMutation.isLoading ? (
+                  <LoadingSpinner size="sm" className="mr-2" />
+              ) : (
+                  <PlayIcon className="w-4 h-4 mr-2" />
+              )}
+              Run Validation
+            </button>
+
+            <button
+                onClick={() => detectConflictsMutation.mutate(modelId)}
+                disabled={detectConflictsMutation.isLoading}
+                className="flex items-center px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50 transition-colors"
+            >
+              {detectConflictsMutation.isLoading ? (
+                  <LoadingSpinner size="sm" className="mr-2" />
+              ) : (
+                  <ExclamationTriangleIcon className="w-4 h-4 mr-2" />
+              )}
+              Check Conflicts
+            </button>
+
+            <button
+                onClick={() => analyzeImpactMutation.mutate({ modelId })}
+                disabled={analyzeImpactMutation.isLoading}
+                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 transition-colors"
+            >
+              {analyzeImpactMutation.isLoading ? (
+                  <LoadingSpinner size="sm" className="mr-2" />
+              ) : (
+                  <BeakerIcon className="w-4 h-4 mr-2" />
+              )}
+              Analyze Impact
             </button>
           </div>
         </div>
-    );
-  }
+      </div>
+  );
 
   return (
       <ErrorBoundary>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Header with Save functionality */}
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">{currentModel.name}</h1>
-                <p className="text-gray-600 mt-1">{currentModel.description}</p>
-                <div className="flex items-center space-x-4 mt-4">
-                <span className="text-sm text-gray-500">
-                  {currentModel.options?.length || 0} Options
-                </span>
-                  <span className="text-sm text-gray-500">
-                  {currentModel.rules?.length || 0} Rules
-                </span>
-                  <span className="text-sm text-gray-500">
-                  {currentModel.groups?.length || 0} Groups
-                </span>
-                  {hasUnsavedChanges && (
-                      <span className="text-sm text-orange-600 font-medium">
-                    • Unsaved changes
-                  </span>
-                  )}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* Header */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <button
+                      onClick={() => navigate('/dashboard')}
+                      className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Back to Dashboard"
+                  >
+                    <ArrowLeftIcon className="w-5 h-5" />
+                  </button>
+
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                      <WrenchScrewdriverIcon className="h-6 w-6 text-blue-600" />
+                      Model Builder
+                    </h1>
+                    <p className="text-gray-600 mt-1">
+                      {model?.name} - Visual editor for CPQ models, rules, and pricing
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex items-center space-x-3">
-                {validationResults && (
-                    <div className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${
-                        validationResults.isValid
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                    }`}>
-                      {validationResults.isValid ? (
-                          <CheckCircleIcon className="h-4 w-4" />
-                      ) : (
-                          <ExclamationTriangleIcon className="h-4 w-4" />
-                      )}
-                      {validationResults.isValid ? 'Valid' : `${validationResults.issues?.length || 0} Issues`}
-                    </div>
-                )}
-
-                <button
-                    onClick={handleManualValidation}
-                    disabled={validateModelMutation.isLoading}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-                >
-                  <CheckCircleIcon className="h-4 w-4" />
-                  {validateModelMutation.isLoading ? 'Validating...' : 'Validate'}
-                </button>
-
-                {/* NEW: Save Button */}
-                <button
-                    onClick={handleSave}
-                    disabled={!hasUnsavedChanges || isSaving}
-                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
-                        hasUnsavedChanges
-                            ? 'bg-blue-600 text-white hover:bg-blue-700'
-                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                >
-                  {isSaving ? (
-                      <>
-                        <ArrowPathIcon className="h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                  ) : (
-                      <>
-                        <DocumentTextIcon className="h-4 w-4" />
-                        {hasUnsavedChanges ? 'Save Changes' : 'No Changes'}
-                      </>
+                {/* Status indicators */}
+                <div className="flex items-center space-x-4">
+                  {validationResults && (
+                      <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
+                          validationResults.isValid
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                      }`}>
+                        {validationResults.isValid ? (
+                            <CheckCircleIcon className="w-4 h-4" />
+                        ) : (
+                            <ExclamationTriangleIcon className="w-4 h-4" />
+                        )}
+                        {validationResults.isValid ? 'Valid' : 'Issues Found'}
+                      </div>
                   )}
-                </button>
 
-                <button
-                    onClick={() => setIsEditing(!isEditing)}
-                    className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2"
-                >
-                  <PencilIcon className="h-4 w-4" />
-                  {isEditing ? 'View Mode' : 'Edit Mode'}
-                </button>
+                  <div className="flex items-center text-sm text-gray-500">
+                    <ClockIcon className="w-4 h-4 mr-1" />
+                    Last updated: {model?.updatedAt ? new Date(model.updatedAt).toLocaleDateString() : 'N/A'}
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* Tab Navigation */}
-            <div className="flex space-x-1 mt-4">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                            activeTab === tab.id
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                        }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {tab.label}
-                    </button>
-                );
-              })}
+            <div className="px-6">
+              <nav className="flex space-x-8 overflow-x-auto">
+                {tabs.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  const Icon = tab.icon;
+
+                  return (
+                      <button
+                          key={tab.id}
+                          onClick={() => setActiveTab(tab.id)}
+                          className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                              isActive
+                                  ? 'border-blue-500 text-blue-600'
+                                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                          }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        {tab.name}
+                      </button>
+                  );
+                })}
+              </nav>
             </div>
           </div>
 
-          {/* Tab Content - Pass updateModel function to components that need it */}
-          <AnimatePresence mode="wait">
-            <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.2 }}
-            >
-              {/* Overview Tab */}
-              {activeTab === 'overview' && (
-                  <div className="bg-white shadow rounded-lg p-6">
-                    <h2 className="text-lg font-medium text-gray-900 mb-4">Model Overview</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-600">{currentModel.options?.length || 0}</div>
-                        <div className="text-sm text-gray-500">Options</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-green-600">{currentModel.rules?.length || 0}</div>
-                        <div className="text-sm text-gray-500">Rules</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-purple-600">{currentModel.groups?.length || 0}</div>
-                        <div className="text-sm text-gray-500">Groups</div>
-                      </div>
+          {/* Tab Content */}
+          <div className="space-y-6">
+            {/* Current tab description */}
+            {currentTab && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center">
+                    <currentTab.icon className="w-5 h-5 text-blue-600 mr-2" />
+                    <div>
+                      <h3 className="text-sm font-medium text-blue-900">{currentTab.name}</h3>
+                      <p className="text-sm text-blue-700">{currentTab.description}</p>
                     </div>
                   </div>
-              )}
+                </div>
+            )}
 
-              {/* Options Tab */}
-              {activeTab === 'options' && (
-                  <OptionsManager
-                      model={currentModel}
-                      isEditing={isEditing}
-                      onUpdate={updateModel}
-                  />
-              )}
+            {/* Tab Content */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+              >
+                {/* Overview Tab */}
+                {activeTab === 'overview' && <OverviewTab />}
 
-              {/* Groups Tab */}
-              {activeTab === 'groups' && (
-                  <GroupsManager
-                      model={currentModel}
-                      isEditing={isEditing}
-                      onUpdate={updateModel}
-                  />
-              )}
+                {/* Options Tab */}
+                {activeTab === 'options' && (
+                    <OptionsManager
+                        modelId={modelId}
+                    />
+                )}
 
-              {/* Rules Tab */}
-              {activeTab === 'rules' && (
-                  <div className="bg-white shadow rounded-lg p-6">
-                    <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-lg font-medium text-gray-900">Constraint Rules</h2>
-                      {isEditing && (
-                          <button
-                              onClick={() => handleRuleEdit()}
-                              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                          >
-                            <PlusIcon className="h-4 w-4" />
-                            Add Rule
-                          </button>
-                      )}
+                {/* Groups Tab */}
+                {activeTab === 'groups' && (
+                    <GroupsManager
+                        modelId={modelId}
+                    />
+                )}
+
+                {/* Rules Tab */}
+                {activeTab === 'rules' && (
+                    <div className="space-y-6">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-gray-900">Business Rules</h3>
+                        <button
+                            onClick={handleRuleCreate}
+                            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                        >
+                          <PlusIcon className="w-4 h-4 mr-2" />
+                          Add Rule
+                        </button>
+                      </div>
+
+                      <RuleEditor
+                          model={model}
+                          onRuleEdit={handleRuleEdit}
+                          onRuleDelete={handleRuleDelete}
+                      />
                     </div>
+                )}
 
-                    <div className="space-y-4">
-                      {currentModel.rules?.map((rule) => (
-                          <div key={rule.id} className="border rounded-lg p-4">
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <h3 className="font-medium text-gray-900">{rule.name}</h3>
-                                <p className="text-sm text-gray-600 mt-1">{rule.description}</p>
-                                <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-2 inline-block">
-                                  {rule.expression}
-                                </code>
-                              </div>
-                              {isEditing && (
-                                  <div className="flex space-x-2">
-                                    <button
-                                        onClick={() => handleRuleEdit(rule)}
-                                        className="text-blue-600 hover:text-blue-800"
-                                    >
-                                      <PencilIcon className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleRuleDelete(rule.id)}
-                                        className="text-red-600 hover:text-red-800"
-                                    >
-                                      <TrashIcon className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                              )}
-                            </div>
-                          </div>
-                      ))}
+                {/* Pricing Tab */}
+                {activeTab === 'pricing' && (
+                    <PricingRulesEditor
+                        modelId={modelId}
+                    />
+                )}
 
-                      {(!currentModel.rules || currentModel.rules.length === 0) && (
-                          <div className="text-center py-8 text-gray-500">
-                            <ExclamationTriangleIcon className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                            <p>No rules defined yet</p>
-                            {isEditing && (
-                                <button
-                                    onClick={() => handleRuleEdit()}
-                                    className="mt-2 text-blue-600 hover:text-blue-700"
-                                >
-                                  Add your first rule
-                                </button>
-                            )}
-                          </div>
-                      )}
-                    </div>
-                  </div>
-              )}
+                {/* Validation Tab */}
+                {activeTab === 'validation' && (
+                    <ModelValidation
+                        modelId={modelId}
+                        results={validationResults}
+                        isLoading={validateModelMutation.isLoading}
+                        onRevalidate={() => validateModelMutation.mutate(modelId)}
+                    />
+                )}
 
-              {/* Pricing Tab */}
-              {activeTab === 'pricing' && (
-                  <PricingRulesEditor
-                      model={currentModel}
-                      isEditing={isEditing}
-                      onUpdate={updateModel}
-                  />
-              )}
+                {/* Conflicts Tab */}
+                {activeTab === 'conflicts' && (
+                    <ConflictDetection
+                        modelId={modelId}
+                        results={conflictResults}
+                        isLoading={detectConflictsMutation.isLoading}
+                        onRedetect={() => detectConflictsMutation.mutate(modelId)}
+                    />
+                )}
 
-              {/* Other tabs remain the same but use currentModel */}
-              {activeTab === 'validation' && (
-                  <ModelValidation
-                      modelId={modelId}
-                      results={validationResults}
-                      isLoading={validateModelMutation.isLoading}
-                      onRevalidate={handleManualValidation}
-                  />
-              )}
-
-              {/* Continue with other tabs... */}
-            </motion.div>
-          </AnimatePresence>
+                {/* Impact Tab */}
+                {activeTab === 'impact' && (
+                    <ImpactAnalysis
+                        modelId={modelId}
+                        results={impactResults}
+                        isLoading={analyzeImpactMutation.isLoading}
+                        onReanalyze={() => analyzeImpactMutation.mutate({ modelId })}
+                    />
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
 
           {/* Rule Editor Modal */}
           <Modal
@@ -532,7 +632,7 @@ const ModelBuilder = () => {
           >
             <RuleEditor
                 rule={selectedRule}
-                model={currentModel}
+                model={model}
                 onSave={handleRuleSave}
                 onCancel={() => setShowRuleEditor(false)}
             />
