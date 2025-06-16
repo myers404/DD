@@ -1,7 +1,7 @@
 .idea
 
-./frontend/node_modules
+./frontend/node_modules/
 ./fontend/package-lock.json
 
-./web/node_modules
-./web/package-lock.jsonnode_modules/
+./web/node_modules/
+./web/package-lock.json
