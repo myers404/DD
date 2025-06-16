@@ -75,7 +75,7 @@
               </label>
               <input
                 type="text"
-                placeholder="e.g., laptop-model-123"
+                placeholder="e.g., sample-laptop"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 bind:value={modelId}
                 onkeydown={(e) => e.key === 'Enter' && modelId.trim() && navigateToModel(modelId.trim())}
@@ -99,7 +99,7 @@
               <button
                 type="button"
                 class="w-full text-left px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded transition-colors"
-                onclick={() => navigateToModel('laptop-model-123')}
+                onclick={() => navigateToModel('sample-laptop')}
               >
                 📱 Laptop Configuration
               </button>

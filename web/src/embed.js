@@ -1,5 +1,6 @@
 // Embed-specific entry point for iframe integration
 import './app.css';
+import { mount } from 'svelte';
 import ConfiguratorApp from './lib/ConfiguratorApp.svelte';
 
 // Parse URL parameters for iframe mode
@@ -8,8 +9,8 @@ const modelId = urlParams.get('model') || window.location.pathname.split('/').po
 const theme = urlParams.get('theme') || 'light';
 const apiUrl = urlParams.get('api') || __API_BASE_URL__;
 
-// Create the embed app
-const app = new ConfiguratorApp({
+// Create the embed app using Svelte 5 mount API
+const app = mount(ConfiguratorApp, {
   target: document.body,
   props: {
     modelId,

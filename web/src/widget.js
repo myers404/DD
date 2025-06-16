@@ -1,95 +1,114 @@
+// Widget entry point for JavaScript embedding
+import './app.css';
+import { mount } from 'svelte';
 import ConfiguratorApp from './lib/ConfiguratorApp.svelte';
 
-class CPQConfigurator {
-  constructor() {
-    this.instances = new Map();
-  }
-  
-  embed(options) {
+// Global widget API
+window.CPQConfigurator = {
+  // Main embed function
+  embed: function(options) {
     const {
       container,
       modelId,
       theme = 'light',
-      apiUrl = 'http://localhost:8080/api/v1',
-      onComplete,
-      onConfigurationChange,
-      onError
+      apiUrl = __API_BASE_URL__,
+      onComplete = null,
+      onConfigurationChange = null,
+      onError = null,
+      ...otherProps
     } = options;
-    
+
+    // Validate required options
     if (!container || !modelId) {
-      throw new Error('Container and modelId are required');
+      throw new Error('CPQConfigurator.embed() requires container and modelId options');
     }
-    
-    const targetElement = typeof container === 'string' 
-      ? document.querySelector(container)
-      : container;
-      
-    if (!targetElement) {
-      throw new Error('Target container not found');
+
+    // Get target element
+    const target = typeof container === 'string'
+        ? document.querySelector(container)
+        : container;
+
+    if (!target) {
+      throw new Error(`Container element not found: ${container}`);
     }
-    
-    // Create configurator instance
-    const instance = new ConfiguratorApp({
-      target: targetElement,
+
+    // Mount the Svelte component using Svelte 5 API
+    const app = mount(ConfiguratorApp, {
+      target,
       props: {
         modelId,
         theme,
         apiUrl,
-        embedMode: true,
+        embedMode: false, // Widget mode, not iframe embed
         onComplete,
         onConfigurationChange,
-        onError
+        onError,
+        ...otherProps
       }
     });
-    
-    // Store instance for cleanup
-    const instanceId = Math.random().toString(36).substr(2, 9);
-    this.instances.set(instanceId, instance);
-    
+
     return {
-      id: instanceId,
-      destroy: () => this.destroy(instanceId),
-      updateProps: (newProps) => {
-        Object.entries(newProps).forEach(([key, value]) => {
-          instance.$set({ [key]: value });
-        });
+      // Return control methods
+      destroy: () => {
+        if (app && typeof app.destroy === 'function') {
+          app.destroy();
+        }
+      },
+
+      // Update props
+      update: (newProps) => {
+        if (app && typeof app.$set === 'function') {
+          app.$set(newProps);
+        }
       }
     };
-  }
-  
-  destroy(instanceId) {
-    const instance = this.instances.get(instanceId);
-    if (instance) {
-      instance.$destroy();
-      this.instances.delete(instanceId);
-    }
-  }
-  
-  destroyAll() {
-    this.instances.forEach(instance => instance.$destroy());
-    this.instances.clear();
-  }
-}
+  },
 
-// Global API
-window.CPQConfigurator = new CPQConfigurator();
+  // Version info
+  version: __BUILD_VERSION__
+};
 
-// Auto-initialize if data attributes present
-document.addEventListener('DOMContentLoaded', () => {
+// Auto-initialization for data attributes
+document.addEventListener('DOMContentLoaded', function() {
+  // Find all elements with data-cpq-configurator attribute
   const autoElements = document.querySelectorAll('[data-cpq-configurator]');
-  
+
   autoElements.forEach(element => {
-    const modelId = element.dataset.cpqModelId;
-    const theme = element.dataset.cpqTheme || 'light';
-    const apiUrl = element.dataset.cpqApiUrl;
-    
+    const modelId = element.getAttribute('data-cpq-model-id');
+    const theme = element.getAttribute('data-cpq-theme') || 'light';
+    const apiUrl = element.getAttribute('data-cpq-api-url') || __API_BASE_URL__;
+
     if (modelId) {
       window.CPQConfigurator.embed({
         container: element,
         modelId,
         theme,
-        ...(apiUrl && { apiUrl })
+        apiUrl,
+        onComplete: (config) => {
+          // Dispatch custom event for auto-initialized widgets
+          const event = new CustomEvent('cpq-configuration-complete', {
+            detail: { configuration: config },
+            bubbles: true
+          });
+          element.dispatchEvent(event);
+        },
+        onConfigurationChange: (config) => {
+          const event = new CustomEvent('cpq-configuration-change', {
+            detail: { configuration: config },
+            bubbles: true
+          });
+          element.dispatchEvent(event);
+        },
+        onError: (error) => {
+          const event = new CustomEvent('cpq-error', {
+            detail: { error },
+            bubbles: true
+          });
+          element.dispatchEvent(event);
+        }
       });
     }
   });
 });
+
+export default window.CPQConfigurator;
