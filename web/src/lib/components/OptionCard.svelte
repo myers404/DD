@@ -1,161 +1,367 @@
+<!-- web/src/lib/components/OptionCard.svelte -->
 <script>
   import { configStore } from '../stores/configuration.svelte.js';
+  import { formatCurrency } from '../utils/format.js';
+  import { throttle } from '../utils/timing.js';
 
-  let {
-    option,
-    group
-  } = $props();
+  let { option, group } = $props();
 
   let quantity = $state(configStore.selections[option.id] || 0);
   let isSelected = $derived(quantity > 0);
-  let totalPrice = $derived(quantity * option.base_price);
+  let isLoading = $state(false);
 
-  // Update store when quantity changes
-  $effect(() => {
-    configStore.updateSelection(option.id, quantity);
-  });
+  // Throttle quantity updates for performance
+  const updateQuantity = throttle((newQuantity) => {
+    configStore.updateSelection(option.id, newQuantity);
+  }, 100);
 
-  function incrementQuantity() {
-    if (group.max_selections && quantity >= group.max_selections) return;
-    quantity++;
-  }
+  // Check for option-specific errors
+  let optionErrors = $derived(
+          configStore.validationResults.violations.filter(v => v.option_id === option.id)
+  );
 
-  function decrementQuantity() {
-    if (quantity > 0) {
-      quantity--;
-    }
-  }
+  function handleQuantityChange(delta) {
+    const newQuantity = Math.max(0, quantity + delta);
 
-  function toggleSelection() {
-    if (isSelected) {
-      quantity = 0;
-    } else {
-      quantity = 1;
-    }
-  }
+    // Check max selections for group
+    if (group.max_selections && delta > 0) {
+      const currentGroupSelections = group.options
+              .filter(opt => configStore.selections[opt.id] > 0)
+              .length;
 
-  // Handle group constraints
-  $effect(() => {
-    if (group.selection_type === 'single' && isSelected) {
-      // Deselect other options in the same group
-      for (const otherOption of group.options) {
-        if (otherOption.id !== option.id && configStore.selections[otherOption.id] > 0) {
-          configStore.updateSelection(otherOption.id, 0);
-        }
+      if (!isSelected && currentGroupSelections >= group.max_selections) {
+        return;
       }
     }
+
+    quantity = newQuantity;
+    updateQuantity(newQuantity);
+  }
+
+  function handleToggle() {
+    if (group.selection_type === 'single') {
+      // For single select, toggle between 0 and 1
+      const newQuantity = isSelected ? 0 : 1;
+      quantity = newQuantity;
+      configStore.updateSelection(option.id, newQuantity);
+    } else {
+      // For multi-select, toggle between 0 and 1
+      handleQuantityChange(isSelected ? -quantity : 1);
+    }
+  }
+
+  // Sync local state with store
+  $effect(() => {
+    quantity = configStore.selections[option.id] || 0;
   });
 </script>
 
-<div class="relative rounded-lg border-2 transition-all duration-200 
-            {isSelected ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-white hover:border-gray-300'}">
-
-  <!-- Selection indicator -->
-  {#if isSelected}
-    <div class="absolute -top-2 -right-2 w-6 h-6 bg-primary-600 rounded-full flex items-center justify-center">
-      <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-      </svg>
-    </div>
-  {/if}
-
-  <div class="p-4">
-    <!-- Option header -->
-    <div class="flex items-start justify-between">
-      <div class="flex-1">
-        <h3 class="text-sm font-medium text-gray-900">{option.name}</h3>
-        {#if option.description}
-          <p class="mt-1 text-sm text-gray-500">{option.description}</p>
-        {/if}
-      </div>
-
-      <div class="ml-4 text-right">
-        <div class="text-sm font-medium text-gray-900">
-          ${option.base_price.toFixed(2)}
-          {#if option.price_unit && option.price_unit !== 'each'}
-            <span class="text-xs text-gray-500">/{option.price_unit}</span>
-          {/if}
-        </div>
-        {#if totalPrice > option.base_price}
-          <div class="text-xs text-primary-600">
-            Total: ${totalPrice.toFixed(2)}
-          </div>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Option constraints/specifications -->
-    {#if option.constraints && option.constraints.length > 0}
-      <div class="mt-2 flex flex-wrap gap-1">
-        {#each option.constraints.slice(0, 3) as constraint}
-          <span class="inline-block px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded">
-            {constraint}
-          </span>
-        {/each}
-        {#if option.constraints.length > 3}
-          <span class="text-xs text-gray-500">+{option.constraints.length - 3} more</span>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Selection controls -->
-    <div class="mt-4 flex items-center justify-between">
-      {#if group.selection_type === 'single'}
-        <!-- Radio button style for single selection -->
-        <button
-                type="button"
-                class="flex items-center space-x-2 text-sm font-medium
-                 {isSelected ? 'text-primary-600' : 'text-gray-500 hover:text-gray-700'}"
-                onclick={toggleSelection}
-        >
-          <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center
-                      {isSelected ? 'border-primary-600 bg-primary-600' : 'border-gray-300'}">
-            {#if isSelected}
-              <div class="w-2 h-2 bg-white rounded-full"></div>
-            {/if}
-          </div>
-          <span>{isSelected ? 'Selected' : 'Select'}</span>
-        </button>
-      {:else}
-        <!-- Quantity controls for multiple selection -->
-        <div class="flex items-center space-x-3">
-          <span class="text-sm text-gray-500">Quantity:</span>
-          <div class="flex items-center space-x-2">
-            <button
-                    type="button"
-                    class="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center
-                     {quantity > 0 ? 'hover:bg-gray-100 text-gray-700' : 'text-gray-400 cursor-not-allowed'}"
-                    onclick={decrementQuantity}
-                    disabled={quantity <= 0}
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
-              </svg>
-            </button>
-
-            <span class="w-8 text-center text-sm font-medium">{quantity}</span>
-
-            <button
-                    type="button"
-                    class="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center
-                     hover:bg-gray-100 text-gray-700
-                     {group.max_selections && quantity >= group.max_selections ? 'opacity-50 cursor-not-allowed' : ''}"
-                    onclick={incrementQuantity}
-                    disabled={group.max_selections && quantity >= group.max_selections}
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-            </button>
-          </div>
-        </div>
+<div
+        class="option-card"
+        class:selected={isSelected}
+        class:has-errors={optionErrors.length > 0}
+        class:loading={isLoading}
+>
+  <div class="option-header">
+    <div class="option-info">
+      <h4 class="option-name">{option.name}</h4>
+      {#if option.sku}
+        <span class="option-sku">SKU: {option.sku}</span>
       {/if}
+    </div>
 
-      {#if option.availability_status && option.availability_status !== 'available'}
-        <div class="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
-          {option.availability_status}
-        </div>
+    <div class="option-price">
+      {formatCurrency(option.base_price)}
+      {#if option.price_unit}
+        <span class="price-unit">/{option.price_unit}</span>
       {/if}
     </div>
   </div>
+
+  {#if option.description}
+    <p class="option-description">{option.description}</p>
+  {/if}
+
+  {#if option.attributes && Object.keys(option.attributes).length > 0}
+    <div class="option-attributes">
+      {#each Object.entries(option.attributes) as [key, value]}
+        <span class="attribute">
+          <span class="attribute-key">{key}:</span>
+          <span class="attribute-value">{value}</span>
+        </span>
+      {/each}
+    </div>
+  {/if}
+
+  {#if optionErrors.length > 0}
+    <div class="option-errors">
+      {#each optionErrors as error}
+        <div class="error-text">{error.message}</div>
+      {/each}
+    </div>
+  {/if}
+
+  <div class="option-controls">
+    {#if group.selection_type === 'single'}
+      <label class="radio-control">
+        <input
+                type="radio"
+                name={`group-${group.id}`}
+                checked={isSelected}
+                onchange={handleToggle}
+                class="radio-input"
+        />
+        <span class="radio-label">Select</span>
+      </label>
+    {:else}
+      <div class="quantity-controls">
+        <button
+                type="button"
+                class="quantity-btn"
+                onclick={() => handleQuantityChange(-1)}
+                disabled={quantity === 0}
+                aria-label="Decrease quantity"
+        >
+          <svg class="icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
+          </svg>
+        </button>
+
+        <input
+                type="number"
+                class="quantity-input"
+                bind:value={quantity}
+                onchange={(e) => updateQuantity(parseInt(e.target.value) || 0)}
+                min="0"
+                max={option.max_quantity || 999}
+        />
+
+        <button
+                type="button"
+                class="quantity-btn"
+                onclick={() => handleQuantityChange(1)}
+                disabled={option.max_quantity && quantity >= option.max_quantity}
+                aria-label="Increase quantity"
+        >
+          <svg class="icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      {#if quantity > 0}
+        <div class="quantity-total">
+          Total: {formatCurrency(option.base_price * quantity)}
+        </div>
+      {/if}
+    {/if}
+  </div>
+
+  {#if option.availability === 'limited'}
+    <div class="availability-warning">
+      Limited availability
+    </div>
+  {:else if option.availability === 'out_of_stock'}
+    <div class="availability-error">
+      Out of stock
+    </div>
+  {/if}
 </div>
+
+<style>
+  .option-card {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .option-card.selected {
+    border-color: var(--primary);
+    background: rgba(59, 130, 246, 0.05);
+  }
+
+  .option-card.has-errors {
+    border-color: var(--error);
+  }
+
+  .option-card.loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .option-card.loading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--primary);
+    animation: loading 1s ease-in-out infinite;
+  }
+
+  @keyframes loading {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  .option-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 0.75rem;
+  }
+
+  .option-name {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .option-sku {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  .option-price {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--primary);
+    text-align: right;
+  }
+
+  .price-unit {
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+  }
+
+  .option-description {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0 0 0.75rem;
+    line-height: 1.5;
+  }
+
+  .option-attributes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .attribute {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: 0.25rem;
+  }
+
+  .attribute-key {
+    color: var(--text-secondary);
+  }
+
+  .attribute-value {
+    font-weight: 500;
+  }
+
+  .option-errors {
+    margin: 0.75rem 0;
+    padding: 0.5rem;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 0.25rem;
+  }
+
+  .error-text {
+    font-size: 0.75rem;
+    color: var(--error);
+  }
+
+  .option-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 1rem;
+  }
+
+  .radio-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+
+  .radio-input {
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+  }
+
+  .quantity-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .quantity-btn {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .quantity-btn:hover:not(:disabled) {
+    background: var(--border);
+  }
+
+  .quantity-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .icon {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .quantity-input {
+    width: 4rem;
+    text-align: center;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--bg);
+  }
+
+  .quantity-total {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--success);
+  }
+
+  .availability-warning {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning);
+    font-size: 0.75rem;
+    text-align: center;
+    border-radius: 0.25rem;
+  }
+
+  .availability-error {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error);
+    font-size: 0.75rem;
+    text-align: center;
+    border-radius: 0.25rem;
+  }
+</style>

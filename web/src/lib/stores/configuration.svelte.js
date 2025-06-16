@@ -1,12 +1,17 @@
+// web/src/lib/stores/configuration.svelte.js
+import { debounce, throttle } from '../utils/timing.js';
 import ConfiguratorApiClient from '../api/client.js';
+import { persist, recover } from '../utils/storage.js';
 
 class ConfigurationStore {
-  // Core state using Svelte 5 runes
+  // Core state
   modelId = $state('');
   model = $state(null);
   selections = $state({});
-  validationResults = $state([]);
+  validationResults = $state({ violations: [], isValid: true });
   pricingData = $state(null);
+
+  // UI state
   isLoading = $state(false);
   isValidating = $state(false);
   isPricing = $state(false);
@@ -18,99 +23,23 @@ class ConfigurationStore {
   lastSaved = $state(null);
   isDirty = $state(false);
 
+  // History for undo/redo
+  history = $state([]);
+  historyIndex = $state(-1);
+  maxHistorySize = 50;
+
+  // Network state
+  isOnline = $state(navigator.onLine);
+  retryQueue = [];
+
   // API client
-  api = $state(null);
+  #api = null;
+  #initialized = false;
+  #cleanupFns = [];
 
-  // Internal flags to prevent infinite loops
-  #lastValidationSelections = '';
-  #lastPricingSelections = '';
-  #debounceTimeouts = new Map();
-  #modelLoading = false;
-
-  constructor() {
-    // Effects will be set up when the store is used in components
-    this.initialized = false;
-  }
-
-  // Initialize effects - call this from components
-  initialize() {
-    if (this.initialized) return;
-    this.initialized = true;
-
-    console.log('🔧 ConfigurationStore initialized');
-
-    // Initialize API client when modelId changes
-    $effect(() => {
-      if (this.modelId && !this.#modelLoading) {
-        console.log('🔄 ModelId changed, initializing API client:', this.modelId);
-        this.api = new ConfiguratorApiClient(__API_BASE_URL__, {
-          modelId: this.modelId
-        });
-        this.loadModel();
-      }
-    });
-
-    // Debounced auto-validation when selections change
-    $effect(() => {
-      const selectionsString = JSON.stringify(this.selections);
-      if (this.api && Object.keys(this.selections).length > 0 &&
-          selectionsString !== this.#lastValidationSelections) {
-
-        // Clear existing timeout
-        this.#clearDebounceTimeout('validation');
-
-        // Set new debounced timeout
-        const timeoutId = setTimeout(() => {
-          this.#lastValidationSelections = selectionsString;
-          this.validateSelections();
-        }, 300); // 300ms debounce
-
-        this.#debounceTimeouts.set('validation', timeoutId);
-      }
-    });
-
-    // Debounced auto-pricing when valid selections exist
-    $effect(() => {
-      const selectionsString = JSON.stringify(this.selections);
-      if (this.api && this.isValid && Object.keys(this.selections).length > 0 &&
-          selectionsString !== this.#lastPricingSelections) {
-
-        // Clear existing timeout
-        this.#clearDebounceTimeout('pricing');
-
-        // Set new debounced timeout
-        const timeoutId = setTimeout(() => {
-          this.#lastPricingSelections = selectionsString;
-          this.calculatePricing();
-        }, 500); // 500ms debounce for pricing
-
-        this.#debounceTimeouts.set('pricing', timeoutId);
-      }
-    });
-
-    // Auto-save every 30 seconds if dirty
-    $effect(() => {
-      if (this.isDirty && this.configurationId) {
-        const interval = setInterval(() => {
-          this.saveConfiguration();
-        }, 30000);
-
-        return () => clearInterval(interval);
-      }
-    });
-  }
-
-  #clearDebounceTimeout(key) {
-    const existingTimeout = this.#debounceTimeouts.get(key);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-      this.#debounceTimeouts.delete(key);
-    }
-  }
-
-  // Derived state (these work without effects)
+  // Computed values
   get isValid() {
-    return this.validationResults.length === 0;
+    return this.validationResults.isValid && this.validationResults.violations.length === 0;
   }
 
   get totalPrice() {
@@ -128,26 +57,22 @@ class ConfigurationStore {
   get selectedOptions() {
     if (!this.model?.option_groups) return [];
 
-    const selected = [];
-    for (const group of this.model.option_groups) {
-      for (const option of group.options) {
-        if (this.selections[option.id] > 0) {
-          selected.push({
-            ...option,
-            quantity: this.selections[option.id],
-            group_name: group.name
-          });
-        }
-      }
-    }
-    return selected;
+    return this.model.option_groups.flatMap(group =>
+        group.options
+            .filter(option => this.selections[option.id] > 0)
+            .map(option => ({
+              ...option,
+              quantity: this.selections[option.id],
+              group_name: group.name
+            }))
+    );
   }
 
   get completionPercentage() {
     if (!this.model?.option_groups) return 0;
 
     const requiredGroups = this.model.option_groups.filter(g => g.required);
-    if (requiredGroups.length === 0) return 100;
+    if (!requiredGroups.length) return 100;
 
     const completedGroups = requiredGroups.filter(group =>
         group.options.some(option => this.selections[option.id] > 0)
@@ -157,142 +82,356 @@ class ConfigurationStore {
   }
 
   get canProceedToNextStep() {
-    return this.completionPercentage >= 100 && this.isValid;
+    return this.completionPercentage >= 100 && this.isValid && !this.isValidating;
   }
 
-  // Core methods
+  get canUndo() {
+    return this.historyIndex > 0;
+  }
+
+  get canRedo() {
+    return this.historyIndex < this.history.length - 1;
+  }
+
+  // Initialize store
+  initialize(apiUrl = window.__API_BASE_URL__) {
+    if (this.#initialized) return;
+    this.#initialized = true;
+
+    // Set up API client
+    this.#api = new ConfiguratorApiClient(apiUrl);
+
+    // Recover from localStorage
+    this.#recoverState();
+
+    // Set up effects
+    this.#setupEffects();
+
+    // Set up network monitoring
+    this.#setupNetworkMonitoring();
+  }
+
+  // Clean up resources
+  destroy() {
+    this.#cleanupFns.forEach(fn => fn());
+    this.#cleanupFns = [];
+    this.#api = null;
+    this.#initialized = false;
+  }
+
+  #setupEffects() {
+    // Auto-load model when modelId changes
+    const unsubModel = $effect.root(() => {
+      $effect(() => {
+        if (this.modelId && this.#api && !this.model && !this.error) {
+          this.#api.modelId = this.modelId;
+          this.loadModel();
+        }
+      });
+    });
+    this.#cleanupFns.push(unsubModel);
+
+    // Debounced validation
+    const validateDebounced = debounce(() => {
+      if (Object.keys(this.selections).length > 0) {
+        this.validateSelections();
+      }
+    }, 300);
+
+    const unsubValidate = $effect.root(() => {
+      $effect(() => {
+        // Track selections changes
+        const _ = JSON.stringify(this.selections);
+        validateDebounced();
+      });
+    });
+    this.#cleanupFns.push(unsubValidate);
+
+    // Debounced pricing
+    const pricingDebounced = debounce(() => {
+      if (this.isValid && Object.keys(this.selections).length > 0) {
+        this.calculatePricing();
+      }
+    }, 500);
+
+    const unsubPricing = $effect.root(() => {
+      $effect(() => {
+        // Track validation state and selections
+        const _ = this.isValid + JSON.stringify(this.selections);
+        pricingDebounced();
+      });
+    });
+    this.#cleanupFns.push(unsubPricing);
+
+    // Auto-save
+    const saveDebounced = debounce(() => {
+      if (this.isDirty) {
+        this.saveConfiguration();
+      }
+    }, 2000);
+
+    const unsubSave = $effect.root(() => {
+      $effect(() => {
+        // Track dirty state
+        if (this.isDirty) {
+          saveDebounced();
+        }
+      });
+    });
+    this.#cleanupFns.push(unsubSave);
+
+    // Persist state changes
+    const unsubPersist = $effect.root(() => {
+      $effect(() => {
+        this.#persistState();
+      });
+    });
+    this.#cleanupFns.push(unsubPersist);
+  }
+
+  #setupNetworkMonitoring() {
+    const handleOnline = () => {
+      this.isOnline = true;
+      this.#processRetryQueue();
+    };
+
+    const handleOffline = () => {
+      this.isOnline = false;
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    this.#cleanupFns.push(() => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    });
+  }
+
+  async #processRetryQueue() {
+    while (this.retryQueue.length > 0 && this.isOnline) {
+      const operation = this.retryQueue.shift();
+      try {
+        await operation();
+      } catch (error) {
+        console.error('Retry failed:', error);
+      }
+    }
+  }
+
+  #persistState() {
+    const state = {
+      modelId: this.modelId,
+      selections: this.selections,
+      configurationId: this.configurationId,
+      currentStep: this.currentStep,
+      lastSaved: this.lastSaved
+    };
+    persist('cpq_config_state', state);
+  }
+
+  #recoverState() {
+    const state = recover('cpq_config_state');
+    if (state) {
+      this.modelId = state.modelId || '';
+      this.selections = state.selections || {};
+      this.configurationId = state.configurationId || null;
+      this.currentStep = state.currentStep || 0;
+      this.lastSaved = state.lastSaved || null;
+    }
+  }
+
+  #addToHistory() {
+    // Remove any redo history
+    this.history = this.history.slice(0, this.historyIndex + 1);
+
+    // Add current state
+    this.history.push({
+      selections: { ...this.selections },
+      timestamp: Date.now()
+    });
+
+    // Limit history size
+    if (this.history.length > this.maxHistorySize) {
+      this.history = this.history.slice(-this.maxHistorySize);
+    }
+
+    this.historyIndex = this.history.length - 1;
+  }
+
+  // Public methods
   setModelId(modelId) {
-    console.log('🆔 setModelId called:', { current: this.modelId, new: modelId });
     if (this.modelId !== modelId) {
-      console.log('🔄 ModelId changing from', this.modelId, 'to', modelId);
       this.modelId = modelId;
-      this.reset();
+      // Only reset if we had a different model loaded
+      if (this.model || this.error) {
+        this.reset();
+      }
     }
   }
 
   async loadModel() {
-    if (!this.api || this.#modelLoading) {
-      console.log('⚠️ Skipping loadModel - no API or already loading');
+    if (!this.#api || this.isLoading || !this.modelId) {
+      console.log('Skipping loadModel:', { api: !!this.#api, isLoading: this.isLoading, modelId: this.modelId });
       return;
     }
 
-    this.#modelLoading = true;
+    console.log('Loading model:', this.modelId);
     this.isLoading = true;
     this.error = null;
 
-    console.log('📡 Loading model:', this.modelId);
-
     try {
-      const model = await this.api.getModel();
-      console.log('✅ Model loaded successfully:', model.name);
-      this.model = model;
+      const response = await this.#api.getModel();
+      console.log('Model loaded successfully:', response);
+      this.model = response.data || response;
 
-      // Initialize selections for any pre-selected options (but only if no current selections)
-      if (Object.keys(this.selections).length === 0) {
-        const initialSelections = {};
-        if (model.option_groups) {
-          for (const group of model.option_groups) {
-            for (const option of group.options) {
-              if (option.default_selected) {
-                initialSelections[option.id] = option.default_quantity || 1;
-              }
+      // Initialize selections for required single-select groups
+      if (this.model?.option_groups) {
+        for (const group of this.model.option_groups) {
+          if (group.required && group.selection_type === 'single' && group.min_selections > 0) {
+            const hasSelection = group.options.some(opt => this.selections[opt.id] > 0);
+            if (!hasSelection && group.options.length > 0) {
+              this.selections[group.options[0].id] = 1;
             }
           }
         }
-
-        if (Object.keys(initialSelections).length > 0) {
-          console.log('🎯 Setting initial selections:', initialSelections);
-          this.selections = initialSelections;
-          this.isDirty = true;
-        }
       }
+    } catch (error) {
+      console.error('Failed to load model:', error);
+      this.error = {
+        type: 'load',
+        message: error.message || 'Failed to load model',
+        code: error.code
+      };
 
-    } catch (err) {
-      this.error = err.message;
-      console.error('❌ Failed to load model:', err);
+      // Only add to retry queue if offline
+      if (!this.isOnline && !error.message.includes('404')) {
+        this.retryQueue.push(() => this.loadModel());
+      }
     } finally {
       this.isLoading = false;
-      this.#modelLoading = false;
-      console.log('🏁 loadModel completed');
     }
   }
 
   updateSelection(optionId, quantity) {
-    const currentQuantity = this.selections[optionId] || 0;
-    if (currentQuantity !== quantity) {
-      if (quantity > 0) {
-        this.selections[optionId] = quantity;
-      } else {
-        delete this.selections[optionId];
-      }
-      this.isDirty = true;
+    const oldSelections = { ...this.selections };
 
-      // Trigger reactive updates
-      this.selections = { ...this.selections };
+    if (quantity > 0) {
+      this.selections[optionId] = quantity;
+    } else {
+      delete this.selections[optionId];
+    }
+
+    // Check group constraints
+    if (this.model?.option_groups) {
+      const option = this.model.option_groups
+          .flatMap(g => g.options)
+          .find(o => o.id === optionId);
+
+      if (option) {
+        const group = this.model.option_groups.find(g =>
+            g.options.some(o => o.id === option.id)
+        );
+
+        if (group?.selection_type === 'single' && quantity > 0) {
+          // Clear other selections in group
+          for (const otherOption of group.options) {
+            if (otherOption.id !== optionId) {
+              delete this.selections[otherOption.id];
+            }
+          }
+        }
+      }
+    }
+
+    // Only mark dirty if actually changed
+    if (JSON.stringify(oldSelections) !== JSON.stringify(this.selections)) {
+      this.isDirty = true;
+      this.#addToHistory();
     }
   }
 
   async validateSelections() {
-    if (!this.api || this.isValidating) return;
+    if (!this.#api || this.isValidating) return;
 
     this.isValidating = true;
 
     try {
-      const result = await this.api.validateConfiguration(this.selections);
-      this.validationResults = result.violations || [];
-    } catch (err) {
-      console.error('Validation failed:', err);
-      this.validationResults = [{
-        type: 'error',
-        message: 'Failed to validate configuration. Please try again.'
-      }];
+      const response = await this.#api.validateConfiguration(this.selections);
+      this.validationResults = {
+        violations: response.data?.violations || [],
+        isValid: response.data?.is_valid ?? true
+      };
+    } catch (error) {
+      if (!this.isOnline) {
+        this.validationResults = { violations: [], isValid: true };
+      } else {
+        this.error = { type: 'validation', message: error.message };
+      }
     } finally {
       this.isValidating = false;
     }
   }
 
   async calculatePricing() {
-    if (!this.api || this.isPricing) return;
+    if (!this.#api || this.isPricing) return;
 
     this.isPricing = true;
 
     try {
-      const pricing = await this.api.calculatePricing(this.selections);
-      this.pricingData = pricing;
-    } catch (err) {
-      console.error('Pricing calculation failed:', err);
-      this.pricingData = null;
+      const response = await this.#api.calculatePricing(this.selections);
+      this.pricingData = response.data || response;
+    } catch (error) {
+      if (!this.isOnline) {
+        // Use cached pricing if available
+        this.pricingData = this.pricingData || null;
+      } else {
+        this.error = { type: 'pricing', message: error.message };
+      }
     } finally {
       this.isPricing = false;
     }
   }
 
   async saveConfiguration() {
-    if (!this.api || !this.isDirty) return null;
+    if (!this.#api || !this.isDirty) return;
 
     try {
-      let result;
+      let response;
       if (this.configurationId) {
-        result = await this.api.updateConfiguration(this.configurationId, {
-          selections: this.selections,
-          pricing: this.pricingData
-        });
+        response = await this.#api.updateConfiguration(this.configurationId, this.selections);
       } else {
-        result = await this.api.createConfiguration({
-          model_id: this.modelId,
-          selections: this.selections,
-          pricing: this.pricingData
-        });
-        this.configurationId = result.id;
+        response = await this.#api.createConfiguration(this.selections);
+        this.configurationId = response.data?.id || response.id;
       }
 
       this.lastSaved = new Date();
       this.isDirty = false;
-      return result;
 
-    } catch (err) {
-      console.error('Failed to save configuration:', err);
-      throw err;
+      return response;
+    } catch (error) {
+      if (!this.isOnline) {
+        this.retryQueue.push(() => this.saveConfiguration());
+      } else {
+        this.error = { type: 'save', message: error.message };
+      }
+      throw error;
+    }
+  }
+
+  undo() {
+    if (this.canUndo) {
+      this.historyIndex--;
+      this.selections = { ...this.history[this.historyIndex].selections };
+      this.isDirty = true;
+    }
+  }
+
+  redo() {
+    if (this.canRedo) {
+      this.historyIndex++;
+      this.selections = { ...this.history[this.historyIndex].selections };
+      this.isDirty = true;
     }
   }
 
@@ -306,83 +445,28 @@ class ConfigurationStore {
     this.currentStep = Math.max(this.currentStep - 1, 0);
   }
 
-  goToStep(step) {
-    this.currentStep = Math.max(0, Math.min(step, 3));
-  }
-
   reset() {
-    console.log('🔄 Resetting store state');
-
-    // Clear timeouts
-    for (const timeoutId of this.#debounceTimeouts.values()) {
-      clearTimeout(timeoutId);
-    }
-    this.#debounceTimeouts.clear();
-
-    // Reset state
     this.model = null;
     this.selections = {};
-    this.validationResults = [];
+    this.validationResults = { violations: [], isValid: true };
     this.pricingData = null;
     this.currentStep = 0;
     this.configurationId = null;
     this.lastSaved = null;
     this.isDirty = false;
     this.error = null;
-
-    // Reset internal flags
-    this.#lastValidationSelections = '';
-    this.#lastPricingSelections = '';
-    this.#modelLoading = false;
+    this.isLoading = false;
+    this.isValidating = false;
+    this.isPricing = false;
+    this.history = [];
+    this.historyIndex = -1;
+    this.retryQueue = [];
   }
 
-  // Sharing and export
-  generateShareableUrl() {
-    const config = {
-      modelId: this.modelId,
-      selections: this.selections,
-      timestamp: Date.now()
-    };
-    const encoded = btoa(JSON.stringify(config));
-    return `${window.location.origin}/configure/${this.modelId}?config=${encoded}`;
-  }
-
-  loadFromShareableUrl(configParam) {
-    try {
-      const decoded = JSON.parse(atob(configParam));
-      if (decoded.modelId && decoded.selections) {
-        this.setModelId(decoded.modelId);
-        this.selections = decoded.selections;
-        this.isDirty = true;
-      }
-    } catch (err) {
-      console.warn('Failed to load shared configuration:', err);
-    }
-  }
-
-  exportConfiguration() {
-    return {
-      model_id: this.modelId,
-      model_name: this.model?.name,
-      selections: this.selectedOptions.map(option => ({
-        option_id: option.id,
-        option_name: option.name,
-        quantity: this.selections[option.id],
-        unit_price: option.base_price,
-        total_price: option.base_price * this.selections[option.id]
-      })),
-      pricing: this.pricingData,
-      validation: {
-        is_valid: this.isValid,
-        errors: this.validationResults
-      },
-      metadata: {
-        created_at: new Date().toISOString(),
-        completion_percentage: this.completionPercentage
-      }
-    };
+  clearError() {
+    this.error = null;
   }
 }
 
-// Create singleton instance
+// Export singleton instance
 export const configStore = new ConfigurationStore();

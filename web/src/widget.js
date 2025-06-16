@@ -1,17 +1,23 @@
-// Widget entry point for JavaScript embedding
-import './app.css';
+// web/src/widget.js
 import { mount } from 'svelte';
 import ConfiguratorApp from './lib/ConfiguratorApp.svelte';
 
+// Initialize global API URL if not set
+if (typeof window !== 'undefined' && !window.__API_BASE_URL__) {
+  window.__API_BASE_URL__ = 'http://localhost:8080/api/v1';
+}
+
 // Global widget API
 window.CPQConfigurator = {
+  instances: new Map(),
+
   // Main embed function
   embed: function(options) {
     const {
       container,
       modelId,
       theme = 'light',
-      apiUrl = __API_BASE_URL__,
+      apiUrl = window.__API_BASE_URL__,
       onComplete = null,
       onConfigurationChange = null,
       onError = null,
@@ -32,83 +38,108 @@ window.CPQConfigurator = {
       throw new Error(`Container element not found: ${container}`);
     }
 
-    // Mount the Svelte component using Svelte 5 API
-    const app = mount(ConfiguratorApp, {
-      target,
-      props: {
-        modelId,
-        theme,
-        apiUrl,
-        embedMode: false, // Widget mode, not iframe embed
-        onComplete,
-        onConfigurationChange,
-        onError,
-        ...otherProps
-      }
+    // Set global API URL
+    window.__API_BASE_URL__ = apiUrl;
+
+    // Clean up any existing instance
+    const existingInstance = this.instances.get(target);
+    if (existingInstance) {
+      existingInstance.$destroy();
+      this.instances.delete(target);
+    }
+
+    // Mount the app
+    try {
+      const app = mount(ConfiguratorApp, {
+        target,
+        props: {
+          modelId,
+          theme,
+          apiUrl,
+          embedMode: true,
+          onComplete,
+          onConfigurationChange,
+          onError,
+          ...otherProps
+        }
+      });
+
+      // Store instance
+      this.instances.set(target, app);
+
+      // Return control API
+      return {
+        destroy: () => {
+          app.$destroy();
+          this.instances.delete(target);
+        },
+
+        update: (newProps) => {
+          Object.assign(app.$state, newProps);
+        },
+
+        getConfiguration: () => {
+          return app.getConfiguration?.() || null;
+        },
+
+        reset: () => {
+          app.reset?.();
+        }
+      };
+    } catch (error) {
+      console.error('Failed to embed configurator:', error);
+      throw error;
+    }
+  },
+
+  // Create standalone instance
+  create: function(options) {
+    const container = document.createElement('div');
+    container.className = 'cpq-configurator-container';
+    document.body.appendChild(container);
+
+    return this.embed({
+      ...options,
+      container,
+      embedMode: false
     });
+  },
 
-    return {
-      // Return control methods
-      destroy: () => {
-        if (app && typeof app.destroy === 'function') {
-          app.destroy();
-        }
-      },
-
-      // Update props
-      update: (newProps) => {
-        if (app && typeof app.$set === 'function') {
-          app.$set(newProps);
-        }
-      }
-    };
+  // Destroy all instances
+  destroyAll: function() {
+    this.instances.forEach((app, target) => {
+      app.$destroy();
+    });
+    this.instances.clear();
   },
 
   // Version info
-  version: __BUILD_VERSION__
+  version: '1.0.0'
 };
 
-// Auto-initialization for data attributes
-document.addEventListener('DOMContentLoaded', function() {
-  // Find all elements with data-cpq-configurator attribute
-  const autoElements = document.querySelectorAll('[data-cpq-configurator]');
+// Auto-initialize if data attributes present
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const autoElements = document.querySelectorAll('[data-cpq-model-id]');
 
-  autoElements.forEach(element => {
-    const modelId = element.getAttribute('data-cpq-model-id');
-    const theme = element.getAttribute('data-cpq-theme') || 'light';
-    const apiUrl = element.getAttribute('data-cpq-api-url') || __API_BASE_URL__;
+    autoElements.forEach(element => {
+      const modelId = element.dataset.cpqModelId;
+      const theme = element.dataset.cpqTheme || 'light';
+      const apiUrl = element.dataset.cpqApiUrl || window.__API_BASE_URL__;
 
-    if (modelId) {
-      window.CPQConfigurator.embed({
-        container: element,
-        modelId,
-        theme,
-        apiUrl,
-        onComplete: (config) => {
-          // Dispatch custom event for auto-initialized widgets
-          const event = new CustomEvent('cpq-configuration-complete', {
-            detail: { configuration: config },
-            bubbles: true
-          });
-          element.dispatchEvent(event);
-        },
-        onConfigurationChange: (config) => {
-          const event = new CustomEvent('cpq-configuration-change', {
-            detail: { configuration: config },
-            bubbles: true
-          });
-          element.dispatchEvent(event);
-        },
-        onError: (error) => {
-          const event = new CustomEvent('cpq-error', {
-            detail: { error },
-            bubbles: true
-          });
-          element.dispatchEvent(event);
-        }
-      });
-    }
+      try {
+        window.CPQConfigurator.embed({
+          container: element,
+          modelId,
+          theme,
+          apiUrl
+        });
+      } catch (error) {
+        console.error('Auto-initialization failed:', error);
+      }
+    });
   });
-});
+}
 
+// Export for ES modules
 export default window.CPQConfigurator;

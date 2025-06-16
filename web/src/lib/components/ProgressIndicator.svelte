@@ -1,52 +1,127 @@
+<!-- web/src/lib/components/ProgressIndicator.svelte -->
 <script>
-  import { configStore } from '../stores/configuration.svelte.js';
-  
+  let {
+    currentStep = 0,
+    completionPercentage = 0
+  } = $props();
+
   const steps = [
-    { id: 0, name: 'Select', description: 'Choose your product' },
-    { id: 1, name: 'Configure', description: 'Customize options' },
-    { id: 2, name: 'Review', description: 'Verify & price' },
-    { id: 3, name: 'Complete', description: 'Finalize order' }
+    { name: 'Configure', icon: '1' },
+    { name: 'Validate', icon: '2' },
+    { name: 'Price', icon: '3' },
+    { name: 'Complete', icon: '4' }
   ];
 </script>
 
-<nav aria-label="Progress">
-  <ol class="flex items-center">
-    {#each steps as step, i}
-      <li class="relative {i < steps.length - 1 ? 'pr-8 sm:pr-20' : ''}">
-        {#if i < steps.length - 1}
-          <div class="absolute inset-0 flex items-center" aria-hidden="true">
-            <div class="h-0.5 w-full {configStore.currentStep > step.id ? 'bg-primary-600' : 'bg-gray-200'}"></div>
-          </div>
-        {/if}
-        
-        <button
-          class="relative w-8 h-8 flex items-center justify-center rounded-full transition-colors
-                 {configStore.currentStep > step.id 
-                   ? 'bg-primary-600 text-white' 
-                   : configStore.currentStep === step.id 
-                     ? 'bg-primary-50 border-2 border-primary-600 text-primary-600'
-                     : 'bg-white border-2 border-gray-300 text-gray-500'}"
-          onclick={() => configStore.goToStep(step.id)}
-          aria-current={configStore.currentStep === step.id ? 'step' : undefined}
-        >
-          {#if configStore.currentStep > step.id}
-            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+<div class="progress-indicator">
+  <div class="progress-bar">
+    <div class="progress-fill" style="width: {completionPercentage}%"></div>
+  </div>
+
+  <div class="progress-steps">
+    {#each steps as step, index}
+      <div
+              class="step"
+              class:active={index === currentStep}
+              class:completed={index < currentStep}
+      >
+        <div class="step-icon">
+          {#if index < currentStep}
+            <svg viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
             </svg>
           {:else}
-            <span class="text-sm font-medium">{step.id + 1}</span>
+            {step.icon}
           {/if}
-        </button>
-        
-        <div class="mt-2 text-center">
-          <div class="text-xs font-medium {configStore.currentStep >= step.id ? 'text-gray-900' : 'text-gray-500'}">
-            {step.name}
-          </div>
-          <div class="text-xs {configStore.currentStep >= step.id ? 'text-gray-500' : 'text-gray-400'}">
-            {step.description}
-          </div>
         </div>
-      </li>
+        <span class="step-name">{step.name}</span>
+      </div>
     {/each}
-  </ol>
-</nav>
+  </div>
+
+  <div class="progress-text">
+    {completionPercentage}% Complete
+  </div>
+</div>
+
+<style>
+  .progress-indicator {
+    margin-bottom: 2rem;
+  }
+
+  .progress-bar {
+    height: 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: 9999px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.3s ease;
+  }
+
+  .progress-steps {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+  }
+
+  .step.active,
+  .step.completed {
+    opacity: 1;
+  }
+
+  .step-icon {
+    width: 2rem;
+    height: 2rem;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+  }
+
+  .step.active .step-icon {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+  }
+
+  .step.completed .step-icon {
+    background: var(--success);
+    color: white;
+    border-color: var(--success);
+  }
+
+  .step-icon svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .step-name {
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .progress-text {
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+</style>

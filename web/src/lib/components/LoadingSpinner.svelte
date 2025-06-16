@@ -1,39 +1,61 @@
+<!-- web/src/lib/components/LoadingSpinner.svelte -->
 <script>
   let {
-    size = 'md',
-    color = 'primary',
+    size = 'medium',
     message = '',
     overlay = false
   } = $props();
 
-  const sizes = {
-    sm: 'w-4 h-4',
-    md: 'w-8 h-8',
-    lg: 'w-12 h-12',
-    xl: 'w-16 h-16'
-  };
-
-  const colors = {
-    primary: 'border-primary-600',
-    gray: 'border-gray-600',
-    white: 'border-white'
+  const sizeClasses = {
+    small: 'w-4 h-4',
+    medium: 'w-8 h-8',
+    large: 'w-12 h-12'
   };
 </script>
 
-{#if overlay}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" aria-live="polite">
-    <div class="bg-white rounded-lg p-6 text-center">
-      <div class="animate-spin rounded-full {sizes[size]} border-2 border-gray-200 {colors[color]} border-t-transparent mx-auto"></div>
-      {#if message}
-        <p class="mt-4 text-sm text-gray-600">{message}</p>
-      {/if}
-    </div>
-  </div>
-{:else}
-  <div class="flex items-center justify-center" aria-live="polite">
-    <div class="animate-spin rounded-full {sizes[size]} border-2 border-gray-200 {colors[color]} border-t-transparent"></div>
+<div class="loading-spinner" class:overlay>
+  <div class="spinner-content">
+    <div class="spinner {sizeClasses[size]}"></div>
     {#if message}
-      <span class="ml-3 text-sm text-gray-600">{message}</span>
+      <p class="loading-message">{message}</p>
     {/if}
   </div>
-{/if}
+</div>
+
+<style>
+  .loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  .loading-spinner.overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+  }
+
+  .spinner-content {
+    text-align: center;
+  }
+
+  .spinner {
+    margin: 0 auto;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .loading-message {
+    margin-top: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+</style>

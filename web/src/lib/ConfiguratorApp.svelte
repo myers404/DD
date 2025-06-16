@@ -1,5 +1,6 @@
+<!-- web/src/lib/ConfiguratorApp.svelte -->
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { configStore } from './stores/configuration.svelte.js';
   import ProgressIndicator from './components/ProgressIndicator.svelte';
   import LoadingSpinner from './components/LoadingSpinner.svelte';
@@ -8,6 +9,8 @@
   import PricingDisplay from './components/PricingDisplay.svelte';
   import ValidationDisplay from './components/ValidationDisplay.svelte';
   import ConfigurationSummary from './components/ConfigurationSummary.svelte';
+  import NetworkStatus from './components/NetworkStatus.svelte';
+  import UndoRedo from './components/UndoRedo.svelte';
 
   let {
     modelId,
@@ -19,235 +22,366 @@
     onError = null
   } = $props();
 
-  const dispatch = createEventDispatcher();
+  let mounted = false;
+  let container;
 
-  let retryCount = $state(0);
-  let isCompact = $state(embedMode);
-  let initialized = $state(false);
-
-  // Set API URL globally
+  // Set API URL globally before anything else
   if (typeof window !== 'undefined') {
     window.__API_BASE_URL__ = apiUrl;
   }
 
   onMount(() => {
-    console.log('🚀 ConfiguratorApp mounting with modelId:', modelId);
+    mounted = true;
 
-    // Initialize the store effects (must be done in component context)
-    configStore.initialize();
+    // Initialize store with API URL first
+    configStore.initialize(apiUrl);
 
-    // Only set modelId once during mount
-    if (!initialized) {
-      configStore.setModelId(modelId);
-      initialized = true;
+    // Then set model ID after a tick to ensure proper initialization
+    if (modelId) {
+      setTimeout(() => {
+        configStore.setModelId(modelId);
+      }, 0);
     }
 
-    // Set up theme
+    // Apply theme
     document.documentElement.setAttribute('data-theme', theme);
 
-    // Handle embed mode
-    if (embedMode) {
-      setupEmbedMode();
+    // Set up event handlers
+    if (onConfigurationChange) {
+      const unsubscribe = $effect.root(() => {
+        $effect(() => {
+          if (configStore.isDirty && configStore.selections) {
+            onConfigurationChange({
+              selections: configStore.selections,
+              validation: configStore.validationResults,
+              pricing: configStore.pricingData
+            });
+          }
+        });
+      });
+
+      return () => unsubscribe();
     }
   });
 
-  // Watch for modelId changes (but only after initial mount)
-  $effect(() => {
-    if (initialized && modelId !== configStore.modelId) {
-      console.log('📝 ModelId prop changed, updating store:', modelId);
-      configStore.setModelId(modelId);
-    }
+  onDestroy(() => {
+    configStore.destroy();
   });
 
-  function setupEmbedMode() {
-    // Listen for parent window messages
-    window.addEventListener('message', handleParentMessage);
+  function handleComplete() {
+    const configuration = {
+      modelId: configStore.modelId,
+      selections: configStore.selections,
+      pricing: configStore.pricingData,
+      validation: configStore.validationResults
+    };
 
-    // Send ready signal to parent
-    if (window.parent !== window) {
-      window.parent.postMessage({
-        type: 'cpq-configurator-ready',
-        modelId
-      }, '*');
+    if (onComplete) {
+      onComplete(configuration);
     }
-
-    // Auto-resize for iframe
-    const resizeObserver = new ResizeObserver(() => {
-      if (window.parent !== window) {
-        window.parent.postMessage({
-          type: 'cpq-configurator-resize',
-          height: document.body.scrollHeight
-        }, '*');
-      }
-    });
-
-    resizeObserver.observe(document.body);
   }
 
-  function handleParentMessage(event) {
-    const { type, data } = event.data;
-
-    switch (type) {
-      case 'cpq-set-theme':
-        theme = data.theme;
-        document.documentElement.setAttribute('data-theme', theme);
-        break;
-
-      case 'cpq-load-configuration':
-        if (data.config) {
-          configStore.loadFromShareableUrl(data.config);
-        }
-        break;
-
-      case 'cpq-get-configuration':
-        window.parent.postMessage({
-          type: 'cpq-configuration-response',
-          configuration: configStore.exportConfiguration()
-        }, '*');
-        break;
+  function handleError(error) {
+    console.error('Configuration error:', error);
+    if (onError) {
+      onError(error);
     }
   }
 
   function handleRetry() {
-    retryCount++;
+    configStore.clearError();
     configStore.loadModel();
   }
 
-  function handleError(error) {
-    console.error('ConfiguratorApp error:', error);
-    if (onError) {
-      onError(error);
-    }
-
-    // Send error to parent if embedded
-    if (embedMode && window.parent !== window) {
-      window.parent.postMessage({
-        type: 'cpq-error',
-        error: error.message
-      }, '*');
-    }
-  }
-
-  function handleConfigurationChange() {
-    if (onConfigurationChange) {
-      onConfigurationChange(configStore.exportConfiguration());
-    }
-
-    // Send to parent if embedded
-    if (embedMode && window.parent !== window) {
-      window.parent.postMessage({
-        type: 'cpq-configuration-change',
-        configuration: configStore.exportConfiguration()
-      }, '*');
-    }
-  }
-
-  function handleComplete() {
-    const config = configStore.exportConfiguration();
-
-    if (onComplete) {
-      onComplete(config);
-    }
-
-    // Send to parent if embedded
-    if (embedMode && window.parent !== window) {
-      window.parent.postMessage({
-        type: 'cpq-configuration-complete',
-        configuration: config
-      }, '*');
-    }
-  }
-
-  // Watch for selection changes to trigger callbacks
   $effect(() => {
-    if (initialized && Object.keys(configStore.selections).length > 0) {
-      handleConfigurationChange();
+    if (configStore.error) {
+      handleError(configStore.error);
     }
   });
 </script>
 
-<div
-        class="cpq-configurator {embedMode ? 'cpq-embed-mode' : ''} {isCompact ? 'cpq-compact' : ''}"
-        data-theme={theme}
->
-  {#if configStore.error}
-    <ErrorBoundary
-            error={configStore.error}
-            onRetry={handleRetry}
-            retryCount={retryCount}
-    />
-  {:else if configStore.isLoading}
-    <LoadingSpinner
-            message="Loading product configuration..."
-            size="large"
-    />
-  {:else if configStore.model}
-    <!-- Progress indicator -->
-    {#if !embedMode}
-      <ProgressIndicator
-              currentStep={configStore.currentStep}
-              totalSteps={4}
-              completionPercentage={configStore.completionPercentage}
-      />
-    {/if}
+<div class="cpq-configurator" bind:this={container} class:embed-mode={embedMode} data-theme={theme}>
+  <NetworkStatus />
 
-    <div class="grid grid-cols-1 {embedMode ? 'lg:grid-cols-1' : 'lg:grid-cols-3'} gap-6">
-      <!-- Options panel -->
-      <div class="{embedMode ? 'col-span-1' : 'col-span-2'} space-y-6">
-        {#if configStore.model.option_groups}
-          {#each configStore.model.option_groups as group}
-            <OptionGroup {group} />
-          {/each}
+  <ErrorBoundary error={configStore.error} onRetry={handleRetry}>
+    {#snippet children()}
+      <div class="configurator-content">
+        {#if configStore.error && configStore.error.code === 'NOT_FOUND'}
+          <div class="error-state">
+            <svg class="error-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+            <h2>Model Not Found</h2>
+            <p>The model with ID "{modelId}" could not be found.</p>
+            <p class="error-details">Please check the model ID and try again.</p>
+          </div>
+        {:else if configStore.isLoading}
+          <LoadingSpinner size="large" message="Loading configuration..." />
+        {:else if configStore.model}
+          <!-- Header with progress -->
+          <div class="configurator-header">
+            <div class="header-content">
+              <h1 class="configurator-title">{configStore.model.name}</h1>
+              {#if configStore.model.description}
+                <p class="configurator-description">{configStore.model.description}</p>
+              {/if}
+            </div>
+
+            <UndoRedo />
+          </div>
+
+          <ProgressIndicator
+                  currentStep={configStore.currentStep}
+                  completionPercentage={configStore.completionPercentage}
+          />
+
+          <!-- Main content -->
+          <div class="configurator-body" class:compact={embedMode}>
+            <!-- Options panel -->
+            <div class="options-panel">
+              {#if configStore.model.option_groups}
+                {#each configStore.model.option_groups as group}
+                  <OptionGroup {group} />
+                {/each}
+              {/if}
+            </div>
+
+            <!-- Sidebar -->
+            <div class="sidebar-panel">
+              <ValidationDisplay />
+              <PricingDisplay detailed={!embedMode} />
+
+              {#if configStore.completionPercentage === 100}
+                <ConfigurationSummary />
+              {/if}
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="configurator-actions">
+            <button
+                    type="button"
+                    class="btn btn-secondary"
+                    disabled={configStore.currentStep === 0}
+                    onclick={() => configStore.previousStep()}
+            >
+              Previous
+            </button>
+
+            <div class="action-group">
+              {#if configStore.isDirty}
+              <span class="save-indicator">
+                {#if configStore.lastSaved}
+                  Last saved {new Date(configStore.lastSaved).toLocaleTimeString()}
+                {:else}
+                  Unsaved changes
+                {/if}
+              </span>
+              {/if}
+
+              <button
+                      type="button"
+                      class="btn btn-primary"
+                      disabled={!configStore.canProceedToNextStep && configStore.currentStep < 3}
+                      onclick={() => {
+                if (configStore.currentStep === 3) {
+                  handleComplete();
+                } else {
+                  configStore.nextStep();
+                }
+              }}
+              >
+                {configStore.currentStep === 3 ? 'Complete' : 'Next'}
+              </button>
+            </div>
+          </div>
+        {:else}
+          <div class="no-model">
+            <p>No model selected</p>
+          </div>
         {/if}
       </div>
-
-      <!-- Sidebar -->
-      {#if !embedMode}
-        <div class="space-y-6">
-          <ValidationDisplay />
-          <PricingDisplay detailed={true} />
-
-          {#if configStore.completionPercentage >= 100}
-            <ConfigurationSummary />
-          {/if}
-        </div>
-      {:else}
-        <!-- Compact pricing for embed mode -->
-        <div class="mt-4">
-          <PricingDisplay detailed={false} />
-          <ValidationDisplay />
-        </div>
-      {/if}
-    </div>
-
-    <!-- Action buttons -->
-    {#if !embedMode}
-      <div class="mt-8 flex justify-between items-center">
-        <button
-                type="button"
-                onclick={() => configStore.previousStep()}
-                class="flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors
-                 {configStore.currentStep === 0 ? 'opacity-50 cursor-not-allowed' : ''}"
-                disabled={configStore.currentStep === 0}
-        >
-          Previous
-        </button>
-
-        <button
-                type="button"
-                onclick={() => configStore.canProceedToNextStep ? handleComplete() : configStore.nextStep()}
-                class="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md text-sm font-medium hover:bg-primary-700 transition-colors
-                 {!configStore.canProceedToNextStep && configStore.currentStep === 3 ? 'opacity-50 cursor-not-allowed' : ''}"
-                disabled={!configStore.canProceedToNextStep && configStore.currentStep === 3}
-        >
-          {configStore.currentStep === 3 ? 'Complete Configuration' : 'Next'}
-        </button>
-      </div>
-    {/if}
-  {:else}
-    <LoadingSpinner
-            message="Initializing configurator..."
-            size="large"
-    />
-  {/if}
+    {/snippet}
+  </ErrorBoundary>
 </div>
+
+<style>
+  .cpq-configurator {
+    --primary: #3b82f6;
+    --primary-hover: #2563eb;
+    --secondary: #6b7280;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --bg: #ffffff;
+    --bg-secondary: #f9fafb;
+    --text: #111827;
+    --text-secondary: #6b7280;
+    --border: #e5e7eb;
+
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .cpq-configurator[data-theme="dark"] {
+    --bg: #111827;
+    --bg-secondary: #1f2937;
+    --text: #f9fafb;
+    --text-secondary: #9ca3af;
+    --border: #374151;
+  }
+
+  .embed-mode {
+    min-height: auto;
+  }
+
+  .configurator-content {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  .configurator-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 2rem;
+  }
+
+  .configurator-title {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .configurator-description {
+    color: var(--text-secondary);
+    margin: 0.5rem 0 0;
+  }
+
+  .configurator-body {
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: 2rem;
+    margin: 2rem 0;
+  }
+
+  .configurator-body.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .options-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .sidebar-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    position: sticky;
+    top: 2rem;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+  }
+
+  .configurator-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .action-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .save-indicator {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+
+  .btn-secondary {
+    background: var(--bg-secondary);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--border);
+  }
+
+  .no-model {
+    text-align: center;
+    padding: 4rem;
+    color: var(--text-secondary);
+  }
+
+  .error-state {
+    text-align: center;
+    padding: 4rem;
+    max-width: 400px;
+    margin: 0 auto;
+  }
+
+  .error-state .error-icon {
+    width: 3rem;
+    height: 3rem;
+    color: var(--warning);
+    margin: 0 auto 1rem;
+  }
+
+  .error-state h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+  }
+
+  .error-state p {
+    color: var(--text-secondary);
+    margin: 0 0 0.5rem;
+  }
+
+  .error-state .error-details {
+    font-size: 0.875rem;
+  }
+
+  @media (max-width: 768px) {
+    .configurator-body {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar-panel {
+      position: static;
+      max-height: none;
+    }
+  }
+</style>

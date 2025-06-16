@@ -1,0 +1,57 @@
+<!-- web/test.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPQ Configurator Test</title>
+</head>
+<body>
+<div style="max-width: 600px; margin: 50px auto; font-family: sans-serif;">
+    <h1>CPQ Configurator Test Page</h1>
+    <p>Click on one of the links below to test the configurator with different models:</p>
+
+    <h2>Available Test Models:</h2>
+    <ul style="line-height: 2;">
+        <li><a href="/?model=sample-laptop">Sample Laptop Configuration</a></li>
+        <li><a href="/?model=laptop-model-123">Laptop Model 123</a></li>
+        <li><a href="/?model=desktop-model">Desktop Model</a></li>
+        <li><a href="/?model=server-config">Server Configuration</a></li>
+    </ul>
+
+    <h2>Theme Options:</h2>
+    <ul style="line-height: 2;">
+        <li><a href="/?model=sample-laptop&theme=light">Light Theme</a></li>
+        <li><a href="/?model=sample-laptop&theme=dark">Dark Theme</a></li>
+    </ul>
+
+    <h2>Widget Test:</h2>
+    <div
+            data-cpq-model-id="sample-laptop"
+            data-cpq-theme="light"
+            style="margin-top: 20px; border: 2px dashed #ccc; padding: 20px; min-height: 400px;"
+    >
+        Widget will load here...
+    </div>
+
+    <hr style="margin: 40px 0;">
+
+    <h2>API Status:</h2>
+    <div id="api-status">Checking API...</div>
+
+    <script>
+        // Check API status
+        fetch('http://localhost:8080/api/v1/health')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('api-status').innerHTML =
+                    '<span style="color: green;">✓ API is running</span>';
+            })
+            .catch(err => {
+                document.getElementById('api-status').innerHTML =
+                    '<span style="color: red;">✗ API is not accessible. Make sure the backend is running on port 8080.</span>';
+            });
+    </script>
+</div>
+</body>
+</html>
