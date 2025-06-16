@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPQ API Debug Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .pending {
+            background-color: #fff3cd;
+            border-color: #ffeeba;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+<h1>CPQ API Debug Test</h1>
+<p style="color: #666;">Tests real backend API endpoints - no mock data. Ensure backend server is running.</p>
+
+<div>
+    <label>API Base URL:
+        <input type="text" id="apiUrl" value="http://localhost:8080/api/v1" style="width: 300px;">
+    </label>
+    <label>Model ID:
+        <input type="text" id="modelId" value="sample-laptop" style="width: 200px;">
+    </label>
+</div>
+
+<div style="margin: 20px 0;">
+    <button onclick="testHealth()">Test Health</button>
+    <button onclick="testListModels()">List All Models</button>
+    <button onclick="testModel()">Test Get Model</button>
+    <button onclick="testGroups()">Test Get Groups</button>
+    <button onclick="testGroupsWithOptions()">Test Groups with Options</button>
+    <button onclick="testOptions()">Test Get Options</button>
+    <button onclick="testValidation()">Test Validation</button>
+    <button onclick="testCreateConfig()">Test Create Config</button>
+    <button onclick="clearTests()">Clear</button>
+</div>
+
+<div id="results"></div>
+
+<script>
+    const results = document.getElementById('results');
+
+    function getApiUrl() {
+        return document.getElementById('apiUrl').value;
+    }
+
+    function getModelId() {
+        return document.getElementById('modelId').value;
+    }
+
+    function addResult(test, status, data) {
+        const div = document.createElement('div');
+        div.className = `test ${status}`;
+        div.innerHTML = `
+        <strong>${test}</strong>
+        <pre>${JSON.stringify(data, null, 2)}</pre>
+      `;
+        results.appendChild(div);
+    }
+
+    function clearTests() {
+        results.innerHTML = '';
+    }
+
+    async function testListModels() {
+        const url = `${getApiUrl()}/models`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+
+            let modelIds = [];
+            if (data.data?.models) {
+                modelIds = data.data.models.map(m => m.id);
+            } else if (data.models) {
+                modelIds = data.models.map(m => m.id);
+            } else if (Array.isArray(data)) {
+                modelIds = data.map(m => m.id);
+            }
+
+            addResult('List Models', response.ok ? 'success' : 'error', {
+                url,
+                status: response.status,
+                availableModelIds: modelIds,
+                fullResponse: data
+            });
+
+            // If models found, update the model ID input with the first one
+            if (modelIds.length > 0) {
+                document.getElementById('modelId').value = modelIds[0];
+            }
+        } catch (error) {
+            addResult('List Models', 'error', {
+                url,
+                error: error.message
+            });
+        }
+    }
+
+    async function testHealth() {
+        const url = `${getApiUrl()}/health`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            addResult('Health Check', response.ok ? 'success' : 'error', {
+                url,
+                status: response.status,
+                data
+            });
+        } catch (error) {
+            addResult('Health Check', 'error', {
+                url,
+                error: error.message
+            });
+        }
+    }
+
+    async function testModel() {
+        const url = `${getApiUrl()}/models/${getModelId()}`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            addResult('Get Model', response.ok ? 'success' : 'error', {
+                url,
+                status: response.status,
+                data
+            });
+        } catch (error) {
+            addResult('Get Model', 'error', {
+                url,
+                error: error.message
+            });
+        }
+    }
+
+    async function testGroups() {
+        const url = `${getApiUrl()}/models/${getModelId()}/groups`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+
+            let groups = [];
+            let optionCount = 0;
+
+            // Extract groups from different possible structures
+            if (data?.data?.groups) {
+                groups = data.data.groups;
+            } else if (data?.data && Array.isArray(data.data)) {
+                groups = data.data;
+            } else if (data?.groups) {
+                groups = data.groups;
+            } else if (data?.option_groups) {
+                groups = data.option_groups;
+            } else if (Array.isArray(data)) {
+                groups = data;
+            }
+
+            // Count options
+            groups.forEach(g => {
+                if (g.options) optionCount += g.options.length;
+                else if (g.Options) optionCount += g.Options.length;
+                else if (g.items) optionCount += g.items.length;
+            });
+
+            addResult('Get Groups', response.ok ? 'success' : 'error', {
+                url,
+                status: response.status,
+                groupCount: groups.length,
+                totalOptions: optionCount,
+                groupNames: groups.map(g => g.name || g.Name || 'unnamed'),
+                sampleGroup: groups[0] || 'No groups',
+                fullResponse: data
+            });
+        } catch (error) {
+            addResult('Get Groups', 'error', {
+                url,
+                error: error.message
+            });
+        }
+    }
+
+    async function testGroupsWithOptions() {
+        const url = `${getApiUrl()}/models/${getModelId()}/groups?include=options`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            addResult('Get Groups with Options', response.ok ? 'success' : 'error', {
+                url,
+                status: response.status,
+                data
+            });
+        } catch (error) {
+            addResult('Get Groups with Options', 'error', {
+                url,
+                error: error.message
+            });
+        }
+    }
+
+    async function testOptions() {
+        const url = `${getApiUrl()}/models/${getModelId()}/options`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+
+            let options = [];
+
+            // Extract options from different possible structures
+            if (data?.data?.options) {
+                options = data.data.options;
+            } else if (data?.data && Array.isArray(data.data)) {
+                options = data.data;
+            } else if (data?.options) {
+                options = data.options;
+            } else if (Array.isArray(data)) {
+                options = data;
+            }
+
+            addResult('Get Options', response.ok ? 'success' : 'error', {
+                url,
+                status: response.status,
+                optionsCount: options.length,
+                sampleOption: options[0] || 'No options',
+                optionProperties: options.length > 0 ? Object.keys(options[0]) : [],
+                groupIds: [...new Set(options.map(o => o.group_id || o.groupId || o.group || 'unknown'))],
+                fullResponse: data
+            });
+        } catch (error) {
+            addResult('Get Options', 'error', {
+                url,
+                error: error.message
+            });
+        }
+    }
+
+    async function testValidation() {
+        const url = `${getApiUrl()}/configurations/validate-selection`;
+        const body = {
+            model_id: getModelId(),
+            selections: []
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            addResult('Validate Selection', response.ok ? 'success' : 'error', {
+                url,
+                method: 'POST',
+                body,
+                status: response.status,
+                data
+            });
+        } catch (error) {
+            addResult('Validate Selection', 'error', {
+                url,
+                method: 'POST',
+                body,
+                error: error.message
+            });
+        }
+    }
+
+    async function testCreateConfig() {
+        const url = `${getApiUrl()}/configurations`;
+        const body = {
+            model_id: getModelId(),
+            selections: []
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            addResult('Create Configuration', response.ok ? 'success' : 'error', {
+                url,
+                method: 'POST',
+                body,
+                status: response.status,
+                data
+            });
+        } catch (error) {
+            addResult('Create Configuration', 'error', {
+                url,
+                method: 'POST',
+                body,
+                error: error.message
+            });
+        }
+    }
+
+    // Run health check on load
+    testHealth();
+</script>
+</body>
+</html>

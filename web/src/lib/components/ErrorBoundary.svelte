@@ -2,51 +2,69 @@
 <script>
   import { onMount } from 'svelte';
 
-  let {
-    error = null,
-    onRetry = null,
-    fallback = null,
-    children
-  } = $props();
+  let error = $state(null);
+  let errorInfo = $state(null);
 
-  let hasError = $state(false);
-  let errorMessage = $state('');
+  onMount(() => {
+    const handleError = (event) => {
+      error = event.error || new Error('Unknown error');
+      errorInfo = {
+        componentStack: event.filename || 'Unknown',
+        lineNumber: event.lineno,
+        columnNumber: event.colno
+      };
+      console.error('Error caught by boundary:', error);
+      event.preventDefault();
+    };
 
-  $effect(() => {
-    if (error) {
-      hasError = true;
-      errorMessage = error.message || 'An unexpected error occurred';
-    }
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', (event) => {
+      error = new Error(event.reason);
+      errorInfo = { componentStack: 'Promise rejection' };
+      event.preventDefault();
+    });
+
+    return () => {
+      window.removeEventListener('error', handleError);
+    };
   });
 
-  function handleRetry() {
-    hasError = false;
-    errorMessage = '';
-    if (onRetry) onRetry();
+  function reset() {
+    error = null;
+    errorInfo = null;
+  }
+
+  function reload() {
+    location.reload();
   }
 </script>
 
-{#if hasError}
-  {#if fallback}
-    {@render fallback()}
-  {:else}
-    <div class="error-boundary">
-      <div class="error-content">
-        <svg class="error-icon" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-        </svg>
-        <h3>Something went wrong</h3>
-        <p>{errorMessage}</p>
-        {#if onRetry}
-          <button class="retry-btn" onclick={handleRetry}>
-            Try Again
-          </button>
-        {/if}
+{#if error}
+  <div class="error-boundary">
+    <div class="error-content">
+      <h2>Something went wrong</h2>
+      <p class="error-message">{error.message}</p>
+
+      {#if import.meta.env.DEV && errorInfo}
+        <details class="error-details">
+          <summary>Error details</summary>
+          <pre>{JSON.stringify(errorInfo, null, 2)}</pre>
+          <pre>{error.stack}</pre>
+        </details>
+      {/if}
+
+      <div class="error-actions">
+        <button onclick={reset} class="btn btn-secondary">
+          Try Again
+        </button>
+        <button onclick={reload} class="btn btn-primary">
+          Reload Page
+        </button>
       </div>
     </div>
-  {/if}
+  </div>
 {:else}
-  {@render children?.()}
+  <slot />
 {/if}
 
 <style>
@@ -54,45 +72,77 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 300px;
+    min-height: 400px;
     padding: 2rem;
   }
 
   .error-content {
     text-align: center;
-    max-width: 400px;
+    max-width: 500px;
   }
 
-  .error-icon {
-    width: 3rem;
-    height: 3rem;
-    color: var(--error);
-    margin: 0 auto 1rem;
+  .error-content h2 {
+    color: var(--error-color, #dc2626);
+    margin-bottom: 1rem;
   }
 
-  h3 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem;
+  .error-message {
+    color: var(--text-secondary, #6b7280);
+    margin-bottom: 2rem;
   }
 
-  p {
-    color: var(--text-secondary);
-    margin: 0 0 1.5rem;
+  .error-details {
+    text-align: left;
+    background: var(--bg-secondary, #f9fafb);
+    padding: 1rem;
+    border-radius: 6px;
+    margin-bottom: 2rem;
   }
 
-  .retry-btn {
-    padding: 0.75rem 1.5rem;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 0.5rem;
-    font-weight: 500;
+  .error-details summary {
     cursor: pointer;
-    transition: background 0.2s;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
   }
 
-  .retry-btn:hover {
-    background: var(--primary-hover);
+  .error-details pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.75rem;
+  }
+
+  .error-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 0.625rem 1.25rem;
+    border-radius: 6px;
+    font-weight: 500;
+    font-size: 0.875rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-primary {
+    background: var(--primary-color, #3b82f6);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background: var(--primary-hover, #2563eb);
+  }
+
+  .btn-secondary {
+    background: var(--secondary-color, #e5e7eb);
+    color: var(--text-primary, #1a1a1a);
+  }
+
+  .btn-secondary:hover {
+    background: var(--secondary-hover, #d1d5db);
   }
 </style>

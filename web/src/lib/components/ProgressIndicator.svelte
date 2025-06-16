@@ -1,24 +1,10 @@
 <!-- web/src/lib/components/ProgressIndicator.svelte -->
 <script>
-  let {
-    currentStep = 0,
-    completionPercentage = 0
-  } = $props();
-
-  const steps = [
-    { name: 'Configure', icon: '1' },
-    { name: 'Validate', icon: '2' },
-    { name: 'Price', icon: '3' },
-    { name: 'Complete', icon: '4' }
-  ];
+  let { steps = [], currentStep = 0, completionPercentage = 0 } = $props();
 </script>
 
 <div class="progress-indicator">
-  <div class="progress-bar">
-    <div class="progress-fill" style="width: {completionPercentage}%"></div>
-  </div>
-
-  <div class="progress-steps">
+  <div class="steps">
     {#each steps as step, index}
       <div
               class="step"
@@ -27,46 +13,39 @@
       >
         <div class="step-icon">
           {#if index < currentStep}
-            <svg viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-            </svg>
+            ✓
           {:else}
-            {step.icon}
+            {step.icon || index + 1}
           {/if}
         </div>
-        <span class="step-name">{step.name}</span>
+        <div class="step-label">{step.label}</div>
       </div>
+      {#if index < steps.length - 1}
+        <div
+                class="step-connector"
+                class:completed={index < currentStep}
+        ></div>
+      {/if}
     {/each}
   </div>
 
-  <div class="progress-text">
-    {completionPercentage}% Complete
+  <div class="progress-bar">
+    <div class="progress-fill" style="width: {completionPercentage}%"></div>
   </div>
 </div>
 
 <style>
   .progress-indicator {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
     margin-bottom: 2rem;
   }
 
-  .progress-bar {
-    height: 0.5rem;
-    background: var(--bg-secondary);
-    border-radius: 9999px;
-    overflow: hidden;
-    margin-bottom: 1.5rem;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--primary);
-    transition: width 0.3s ease;
-  }
-
-  .progress-steps {
+  .steps {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    margin-bottom: 1rem;
   }
 
   .step {
@@ -74,54 +53,65 @@
     flex-direction: column;
     align-items: center;
     gap: 0.5rem;
-    opacity: 0.5;
-    transition: opacity 0.2s;
-  }
-
-  .step.active,
-  .step.completed {
-    opacity: 1;
+    flex: 1;
   }
 
   .step-icon {
-    width: 2rem;
-    height: 2rem;
-    background: var(--bg-secondary);
-    border: 2px solid var(--border);
+    width: 2.5rem;
+    height: 2.5rem;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
+    background: var(--bg-secondary, #f3f4f6);
+    color: var(--text-secondary, #6b7280);
     font-weight: 600;
-    font-size: 0.875rem;
-    transition: all 0.2s;
+    transition: all 0.3s;
   }
 
   .step.active .step-icon {
-    background: var(--primary);
+    background: var(--primary-color, #3b82f6);
     color: white;
-    border-color: var(--primary);
+    transform: scale(1.1);
   }
 
   .step.completed .step-icon {
-    background: var(--success);
+    background: var(--success-color, #10b981);
     color: white;
-    border-color: var(--success);
   }
 
-  .step-icon svg {
-    width: 1rem;
-    height: 1rem;
-  }
-
-  .step-name {
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-
-  .progress-text {
-    text-align: center;
+  .step-label {
     font-size: 0.875rem;
-    color: var(--text-secondary);
+    color: var(--text-secondary, #6b7280);
+    text-align: center;
+  }
+
+  .step.active .step-label {
+    color: var(--primary-color, #3b82f6);
+    font-weight: 600;
+  }
+
+  .step-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--border-color, #e5e7eb);
+    margin: 0 0.5rem 1.5rem;
+  }
+
+  .step-connector.completed {
+    background: var(--success-color, #10b981);
+  }
+
+  .progress-bar {
+    height: 0.5rem;
+    background: var(--bg-secondary, #f3f4f6);
+    border-radius: 0.25rem;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--primary-color, #3b82f6);
+    transition: width 0.3s ease;
   }
 </style>

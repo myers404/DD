@@ -1,61 +1,65 @@
 <!-- web/src/lib/components/LoadingSpinner.svelte -->
 <script>
-  let {
-    size = 'medium',
-    message = '',
-    overlay = false
-  } = $props();
-
-  const sizeClasses = {
-    small: 'w-4 h-4',
-    medium: 'w-8 h-8',
-    large: 'w-12 h-12'
-  };
+  let { message = 'Loading...', size = 'medium' } = $props();
 </script>
 
-<div class="loading-spinner" class:overlay>
-  <div class="spinner-content">
-    <div class="spinner {sizeClasses[size]}"></div>
-    {#if message}
-      <p class="loading-message">{message}</p>
-    {/if}
-  </div>
+<div class="loading-spinner {size}">
+  <div class="spinner"></div>
+  <p class="message">{message}</p>
 </div>
 
 <style>
   .loading-spinner {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 1rem;
     padding: 2rem;
+    min-height: 200px;
   }
 
-  .loading-spinner.overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 9999;
+  .loading-spinner.small {
+    min-height: 100px;
+    padding: 1rem;
   }
 
-  .spinner-content {
-    text-align: center;
+  .loading-spinner.large {
+    min-height: 400px;
   }
 
   .spinner {
-    margin: 0 auto;
-    border: 3px solid var(--border);
-    border-top-color: var(--primary);
+    width: 3rem;
+    height: 3rem;
+    border: 3px solid var(--border-color, #e5e7eb);
+    border-top-color: var(--primary-color, #3b82f6);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 1s linear infinite;
   }
 
-  .loading-message {
-    margin-top: 1rem;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
+  .small .spinner {
+    width: 2rem;
+    height: 2rem;
+    border-width: 2px;
+  }
+
+  .large .spinner {
+    width: 4rem;
+    height: 4rem;
+    border-width: 4px;
   }
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  .message {
+    margin: 0;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.875rem;
+  }
+
+  .large .message {
+    font-size: 1rem;
   }
 </style>

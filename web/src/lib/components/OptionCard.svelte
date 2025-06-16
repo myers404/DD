@@ -1,367 +1,284 @@
 <!-- web/src/lib/components/OptionCard.svelte -->
 <script>
   import { configStore } from '../stores/configuration.svelte.js';
-  import { formatCurrency } from '../utils/format.js';
-  import { throttle } from '../utils/timing.js';
 
   let { option, group } = $props();
 
-  let quantity = $state(configStore.selections[option.id] || 0);
+  let quantity = $derived(configStore.selections[option.id] || 0);
   let isSelected = $derived(quantity > 0);
-  let isLoading = $state(false);
-
-  // Throttle quantity updates for performance
-  const updateQuantity = throttle((newQuantity) => {
-    configStore.updateSelection(option.id, newQuantity);
-  }, 100);
-
-  // Check for option-specific errors
-  let optionErrors = $derived(
-          configStore.validationResults.violations.filter(v => v.option_id === option.id)
+  let isAvailable = $derived(
+          !configStore.availableOptions.length ||
+          configStore.availableOptions.some(opt => opt.option_id === option.id)
   );
 
-  function handleQuantityChange(delta) {
-    const newQuantity = Math.max(0, quantity + delta);
+  let totalPrice = $derived(quantity * (option.base_price || 0));
 
-    // Check max selections for group
-    if (group.max_selections && delta > 0) {
-      const currentGroupSelections = group.options
-              .filter(opt => configStore.selections[opt.id] > 0)
-              .length;
-
-      if (!isSelected && currentGroupSelections >= group.max_selections) {
-        return;
-      }
-    }
-
-    quantity = newQuantity;
-    updateQuantity(newQuantity);
+  function getMaxQuantity() {
+    if (group.selection_type === 'single') return 1;
+    return group.max_selections || 10;
   }
 
-  function handleToggle() {
-    if (group.selection_type === 'single') {
-      // For single select, toggle between 0 and 1
-      const newQuantity = isSelected ? 0 : 1;
-      quantity = newQuantity;
-      configStore.updateSelection(option.id, newQuantity);
-    } else {
-      // For multi-select, toggle between 0 and 1
-      handleQuantityChange(isSelected ? -quantity : 1);
+  function updateQuantity(newQty) {
+    if (!isAvailable && newQty > 0) return;
+    configStore.updateSelection(option.id, newQty);
+  }
+
+  function increment() {
+    if (quantity < getMaxQuantity()) {
+      updateQuantity(quantity + 1);
     }
   }
 
-  // Sync local state with store
-  $effect(() => {
-    quantity = configStore.selections[option.id] || 0;
-  });
+  function decrement() {
+    if (quantity > 0) {
+      updateQuantity(quantity - 1);
+    }
+  }
+
+  function toggle() {
+    updateQuantity(isSelected ? 0 : 1);
+  }
 </script>
 
 <div
         class="option-card"
         class:selected={isSelected}
-        class:has-errors={optionErrors.length > 0}
-        class:loading={isLoading}
+        class:unavailable={!isAvailable}
 >
   <div class="option-header">
-    <div class="option-info">
-      <h4 class="option-name">{option.name}</h4>
-      {#if option.sku}
-        <span class="option-sku">SKU: {option.sku}</span>
-      {/if}
-    </div>
-
-    <div class="option-price">
-      {formatCurrency(option.base_price)}
-      {#if option.price_unit}
-        <span class="price-unit">/{option.price_unit}</span>
-      {/if}
-    </div>
-  </div>
-
-  {#if option.description}
-    <p class="option-description">{option.description}</p>
-  {/if}
-
-  {#if option.attributes && Object.keys(option.attributes).length > 0}
-    <div class="option-attributes">
-      {#each Object.entries(option.attributes) as [key, value]}
-        <span class="attribute">
-          <span class="attribute-key">{key}:</span>
-          <span class="attribute-value">{value}</span>
-        </span>
-      {/each}
-    </div>
-  {/if}
-
-  {#if optionErrors.length > 0}
-    <div class="option-errors">
-      {#each optionErrors as error}
-        <div class="error-text">{error.message}</div>
-      {/each}
-    </div>
-  {/if}
-
-  <div class="option-controls">
-    {#if group.selection_type === 'single'}
-      <label class="radio-control">
-        <input
-                type="radio"
-                name={`group-${group.id}`}
-                checked={isSelected}
-                onchange={handleToggle}
-                class="radio-input"
-        />
-        <span class="radio-label">Select</span>
-      </label>
-    {:else}
-      <div class="quantity-controls">
-        <button
-                type="button"
-                class="quantity-btn"
-                onclick={() => handleQuantityChange(-1)}
-                disabled={quantity === 0}
-                aria-label="Decrease quantity"
-        >
-          <svg class="icon" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
-          </svg>
-        </button>
-
-        <input
-                type="number"
-                class="quantity-input"
-                bind:value={quantity}
-                onchange={(e) => updateQuantity(parseInt(e.target.value) || 0)}
-                min="0"
-                max={option.max_quantity || 999}
-        />
-
-        <button
-                type="button"
-                class="quantity-btn"
-                onclick={() => handleQuantityChange(1)}
-                disabled={option.max_quantity && quantity >= option.max_quantity}
-                aria-label="Increase quantity"
-        >
-          <svg class="icon" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-          </svg>
-        </button>
-      </div>
-
-      {#if quantity > 0}
-        <div class="quantity-total">
-          Total: {formatCurrency(option.base_price * quantity)}
-        </div>
-      {/if}
+    <h4>{option.name}</h4>
+    {#if option.sku}
+      <span class="sku">SKU: {option.sku}</span>
     {/if}
   </div>
 
-  {#if option.availability === 'limited'}
-    <div class="availability-warning">
-      Limited availability
-    </div>
-  {:else if option.availability === 'out_of_stock'}
-    <div class="availability-error">
-      Out of stock
+  {#if option.description}
+    <p class="description">{option.description}</p>
+  {/if}
+
+  <div class="price-section">
+    <span class="base-price">
+      ${(option.base_price || 0).toFixed(2)}
+      {#if quantity > 1}
+        <span class="price-each">each</span>
+      {/if}
+    </span>
+    {#if quantity > 1}
+      <span class="total-price">
+        Total: ${totalPrice.toFixed(2)}
+      </span>
+    {/if}
+  </div>
+
+  <div class="actions">
+    {#if group.selection_type === 'single'}
+      <button
+              class="select-button"
+              class:selected={isSelected}
+              onclick={toggle}
+              disabled={!isAvailable}
+      >
+        {isSelected ? '✓ Selected' : 'Select'}
+      </button>
+    {:else}
+      <div class="quantity-controls">
+        <button
+                class="qty-button"
+                onclick={decrement}
+                disabled={quantity === 0}
+                aria-label="Decrease quantity"
+        >
+          −
+        </button>
+        <input
+                type="number"
+                value={quantity}
+                min="0"
+                max={getMaxQuantity()}
+                onchange={(e) => updateQuantity(parseInt(e.target.value) || 0)}
+                disabled={!isAvailable}
+                aria-label="Quantity"
+        />
+        <button
+                class="qty-button"
+                onclick={increment}
+                disabled={quantity >= getMaxQuantity() || !isAvailable}
+                aria-label="Increase quantity"
+        >
+          +
+        </button>
+      </div>
+    {/if}
+  </div>
+
+  {#if !isAvailable && !isSelected}
+    <div class="unavailable-overlay">
+      <span>Not available with current selection</span>
     </div>
   {/if}
 </div>
 
 <style>
   .option-card {
-    background: var(--bg);
-    border: 2px solid var(--border);
-    border-radius: 0.75rem;
+    position: relative;
+    background: white;
+    border: 2px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
     padding: 1.25rem;
     transition: all 0.2s;
-    position: relative;
-    overflow: hidden;
+  }
+
+  .option-card:hover:not(.unavailable) {
+    border-color: var(--primary-light, #93bbfc);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   }
 
   .option-card.selected {
-    border-color: var(--primary);
-    background: rgba(59, 130, 246, 0.05);
+    border-color: var(--primary-color, #3b82f6);
+    background: var(--primary-bg, #eff6ff);
   }
 
-  .option-card.has-errors {
-    border-color: var(--error);
-  }
-
-  .option-card.loading {
+  .option-card.unavailable {
     opacity: 0.6;
-    pointer-events: none;
-  }
-
-  .option-card.loading::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--primary);
-    animation: loading 1s ease-in-out infinite;
-  }
-
-  @keyframes loading {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
   }
 
   .option-header {
     display: flex;
     justify-content: space-between;
     align-items: start;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
   }
 
-  .option-name {
+  .option-header h4 {
     font-size: 1rem;
     font-weight: 600;
+    color: var(--text-primary, #1a1a1a);
     margin: 0;
   }
 
-  .option-sku {
+  .sku {
     font-size: 0.75rem;
-    color: var(--text-secondary);
+    color: var(--text-tertiary, #9ca3af);
   }
 
-  .option-price {
-    font-size: 1.125rem;
-    font-weight: 700;
-    color: var(--primary);
-    text-align: right;
-  }
-
-  .price-unit {
+  .description {
     font-size: 0.875rem;
-    font-weight: 400;
-    color: var(--text-secondary);
-  }
-
-  .option-description {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin: 0 0 0.75rem;
+    color: var(--text-secondary, #6b7280);
+    margin: 0 0 1rem;
     line-height: 1.5;
   }
 
-  .option-attributes {
+  .price-section {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .attribute {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-    background: var(--bg-secondary);
-    border-radius: 0.25rem;
-  }
-
-  .attribute-key {
-    color: var(--text-secondary);
-  }
-
-  .attribute-value {
-    font-weight: 500;
-  }
-
-  .option-errors {
-    margin: 0.75rem 0;
-    padding: 0.5rem;
-    background: rgba(239, 68, 68, 0.1);
-    border-radius: 0.25rem;
-  }
-
-  .error-text {
-    font-size: 0.75rem;
-    color: var(--error);
-  }
-
-  .option-controls {
-    display: flex;
-    align-items: center;
     justify-content: space-between;
-    margin-top: 1rem;
+    align-items: baseline;
+    margin-bottom: 1rem;
   }
 
-  .radio-control {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
+  .base-price {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--primary-color, #3b82f6);
   }
 
-  .radio-input {
-    width: 1.25rem;
-    height: 1.25rem;
+  .price-each {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-secondary, #6b7280);
+  }
+
+  .total-price {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #6b7280);
+  }
+
+  .actions {
+    margin-top: auto;
+  }
+
+  .select-button {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    border: 2px solid var(--primary-color, #3b82f6);
+    border-radius: 6px;
+    background: white;
+    color: var(--primary-color, #3b82f6);
+    font-weight: 500;
     cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .select-button:hover:not(:disabled) {
+    background: var(--primary-color, #3b82f6);
+    color: white;
+  }
+
+  .select-button.selected {
+    background: var(--primary-color, #3b82f6);
+    color: white;
+  }
+
+  .select-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .quantity-controls {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
   }
 
-  .quantity-btn {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    padding: 0.5rem;
+  .qty-button {
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 4px;
+    background: white;
+    font-size: 1.125rem;
     cursor: pointer;
     transition: all 0.2s;
   }
 
-  .quantity-btn:hover:not(:disabled) {
-    background: var(--border);
+  .qty-button:hover:not(:disabled) {
+    background: var(--bg-hover, #f9fafb);
+    border-color: var(--primary-color, #3b82f6);
   }
 
-  .quantity-btn:disabled {
+  .qty-button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .icon {
-    width: 1rem;
-    height: 1rem;
-  }
-
-  .quantity-input {
-    width: 4rem;
+  .quantity-controls input {
+    width: 3rem;
     text-align: center;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--bg);
-  }
-
-  .quantity-total {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 4px;
+    padding: 0.375rem;
     font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--success);
   }
 
-  .availability-warning {
-    margin-top: 0.75rem;
-    padding: 0.5rem;
-    background: rgba(245, 158, 11, 0.1);
-    color: var(--warning);
-    font-size: 0.75rem;
-    text-align: center;
-    border-radius: 0.25rem;
+  .quantity-controls input:focus {
+    outline: none;
+    border-color: var(--primary-color, #3b82f6);
   }
 
-  .availability-error {
-    margin-top: 0.75rem;
-    padding: 0.5rem;
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--error);
-    font-size: 0.75rem;
+  .unavailable-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+  }
+
+  .unavailable-overlay span {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #6b7280);
     text-align: center;
-    border-radius: 0.25rem;
+    padding: 1rem;
   }
 </style>

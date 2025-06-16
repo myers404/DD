@@ -29,18 +29,18 @@ func (s *Server) setupPricingRoutes(router *mux.Router) {
 	handlers := NewPricingHandlers(s.cpqService)
 
 	// Core pricing operations
-	router.HandleFunc("/calculate", handlers.CalculatePrice).Methods("POST")
-	router.HandleFunc("/simulate", handlers.SimulatePricing).Methods("POST")
-	router.HandleFunc("/validate", handlers.ValidatePricing).Methods("POST")
+	router.HandleFunc("/calculate", handlers.CalculatePrice).Methods("POST", "OPTIONS")
+	router.HandleFunc("/simulate", handlers.SimulatePricing).Methods("POST", "OPTIONS")
+	router.HandleFunc("/validate", handlers.ValidatePricing).Methods("POST", "OPTIONS")
 
 	// Pricing structure queries
-	router.HandleFunc("/rules/{model_id}", handlers.GetPriceRules).Methods("GET")
-	router.HandleFunc("/volume-tiers", handlers.GetVolumeTiers).Methods("GET")
-	router.HandleFunc("/volume-tiers/{model_id}", handlers.GetModelVolumeTiers).Methods("GET")
+	router.HandleFunc("/rules/{model_id}", handlers.GetPriceRules).Methods("GET", "OPTIONS")
+	router.HandleFunc("/volume-tiers", handlers.GetVolumeTiers).Methods("GET", "OPTIONS")
+	router.HandleFunc("/volume-tiers/{model_id}", handlers.GetModelVolumeTiers).Methods("GET", "OPTIONS")
 
 	// Bulk pricing operations
-	router.HandleFunc("/bulk-calculate", handlers.BulkCalculate).Methods("POST")
-	router.HandleFunc("/batch-simulate", handlers.BatchSimulate).Methods("POST")
+	router.HandleFunc("/bulk-calculate", handlers.BulkCalculate).Methods("POST", "OPTIONS")
+	router.HandleFunc("/batch-simulate", handlers.BatchSimulate).Methods("POST", "OPTIONS")
 }
 
 // Core Pricing Operations

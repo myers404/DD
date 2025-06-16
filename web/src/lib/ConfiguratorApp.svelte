@@ -1,6 +1,6 @@
 <!-- web/src/lib/ConfiguratorApp.svelte -->
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, createEventDispatcher } from 'svelte';
   import { configStore } from './stores/configuration.svelte.js';
   import ProgressIndicator from './components/ProgressIndicator.svelte';
   import LoadingSpinner from './components/LoadingSpinner.svelte';
@@ -9,307 +9,377 @@
   import PricingDisplay from './components/PricingDisplay.svelte';
   import ValidationDisplay from './components/ValidationDisplay.svelte';
   import ConfigurationSummary from './components/ConfigurationSummary.svelte';
-  import NetworkStatus from './components/NetworkStatus.svelte';
-  import UndoRedo from './components/UndoRedo.svelte';
 
   let {
     modelId,
     theme = 'light',
-    apiUrl = 'http://localhost:8080/api/v1',
+    apiUrl = '/api/v1',
     embedMode = false,
     onComplete = null,
     onConfigurationChange = null,
     onError = null
   } = $props();
 
-  let mounted = false;
-  let container;
+  const dispatch = createEventDispatcher();
 
-  // Set API URL globally before anything else
+  let mounted = $state(false);
+  let steps = $derived([
+    { id: 'configure', label: 'Configure', icon: '⚙️' },
+    { id: 'validate', label: 'Validate', icon: '✓' },
+    { id: 'price', label: 'Price', icon: '💰' },
+    { id: 'summary', label: 'Summary', icon: '📋' }
+  ]);
+
+  // Set API URL globally
   if (typeof window !== 'undefined') {
     window.__API_BASE_URL__ = apiUrl;
+    console.log('Configurator initialized with API URL:', apiUrl);
   }
 
   onMount(() => {
+    configStore.initialize();
+    configStore.setModelId(modelId);
     mounted = true;
 
-    // Initialize store with API URL first
-    configStore.initialize(apiUrl);
-
-    // Then set model ID after a tick to ensure proper initialization
-    if (modelId) {
-      setTimeout(() => {
-        configStore.setModelId(modelId);
-      }, 0);
-    }
-
-    // Apply theme
+    // Set theme
     document.documentElement.setAttribute('data-theme', theme);
 
-    // Set up event handlers
-    if (onConfigurationChange) {
-      const unsubscribe = $effect.root(() => {
-        $effect(() => {
-          if (configStore.isDirty && configStore.selections) {
-            onConfigurationChange({
-              selections: configStore.selections,
-              validation: configStore.validationResults,
-              pricing: configStore.pricingData
-            });
-          }
-        });
+    // Watch for changes
+    const unsubscribe = $effect.root(() => {
+      $effect(() => {
+        if (onConfigurationChange && Object.keys(configStore.selections).length > 0) {
+          onConfigurationChange(configStore.exportConfiguration());
+        }
       });
 
-      return () => unsubscribe();
-    }
-  });
+      $effect(() => {
+        if (onError && configStore.error) {
+          onError(configStore.error);
+        }
+      });
+    });
 
-  onDestroy(() => {
-    configStore.destroy();
+    return () => {
+      unsubscribe();
+      configStore.reset();
+    };
   });
 
   function handleComplete() {
-    const configuration = {
-      modelId: configStore.modelId,
-      selections: configStore.selections,
-      pricing: configStore.pricingData,
-      validation: configStore.validationResults
-    };
+    const config = configStore.exportConfiguration();
+    dispatch('complete', config);
+    onComplete?.(config);
+  }
 
-    if (onComplete) {
-      onComplete(configuration);
+  function nextStep() {
+    if (configStore.currentStep < steps.length - 1) {
+      configStore.currentStep++;
     }
   }
 
-  function handleError(error) {
-    console.error('Configuration error:', error);
-    if (onError) {
-      onError(error);
+  function prevStep() {
+    if (configStore.currentStep > 0) {
+      configStore.currentStep--;
     }
   }
-
-  function handleRetry() {
-    configStore.clearError();
-    configStore.loadModel();
-  }
-
-  $effect(() => {
-    if (configStore.error) {
-      handleError(configStore.error);
-    }
-  });
 </script>
 
-<div class="cpq-configurator" bind:this={container} class:embed-mode={embedMode} data-theme={theme}>
-  <NetworkStatus />
+<div class="configurator-app {embedMode ? 'embed-mode' : ''}" data-theme={theme}>
+  <ErrorBoundary>
+    {#if !mounted || configStore.isLoading}
+      <LoadingSpinner message="Loading configuration..." />
+    {:else if configStore.error && configStore.retryCount >= 3}
+      <div class="error-container">
+        <div class="error-message">
+          <h3>Configuration Error</h3>
+          <p>{configStore.error}</p>
+          <button onclick={() => location.reload()} class="btn btn-primary">
+            Reload Page
+          </button>
+        </div>
+      </div>
+    {:else}
+      <div class="configurator-container">
+        <!-- Progress indicator -->
+        <ProgressIndicator
+                steps={steps}
+                currentStep={configStore.currentStep}
+                completionPercentage={configStore.completionPercentage}
+        />
 
-  <ErrorBoundary error={configStore.error} onRetry={handleRetry}>
-    {#snippet children()}
-      <div class="configurator-content">
-        {#if configStore.error && configStore.error.code === 'NOT_FOUND'}
-          <div class="error-state">
-            <svg class="error-icon" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-            </svg>
-            <h2>Model Not Found</h2>
-            <p>The model with ID "{modelId}" could not be found.</p>
-            <p class="error-details">Please check the model ID and try again.</p>
-          </div>
-        {:else if configStore.isLoading}
-          <LoadingSpinner size="large" message="Loading configuration..." />
-        {:else if configStore.model}
-          <!-- Header with progress -->
-          <div class="configurator-header">
-            <div class="header-content">
-              <h1 class="configurator-title">{configStore.model.name}</h1>
-              {#if configStore.model.description}
-                <p class="configurator-description">{configStore.model.description}</p>
-              {/if}
-            </div>
+        <!-- Main content -->
+        <div class="configurator-content">
+          {#if configStore.currentStep === 0}
+            <!-- Configuration step -->
+            <div class="configuration-step">
+              <h2>Configure Your {configStore.model?.name || 'Product'}</h2>
 
-            <UndoRedo />
-          </div>
+              {#if configStore.model?.option_groups && Array.isArray(configStore.model.option_groups)}
+                {@const hasAnyOptions = configStore.model.option_groups.some(g => g.options?.length > 0)}
 
-          <ProgressIndicator
-                  currentStep={configStore.currentStep}
-                  completionPercentage={configStore.completionPercentage}
-          />
-
-          <!-- Main content -->
-          <div class="configurator-body" class:compact={embedMode}>
-            <!-- Options panel -->
-            <div class="options-panel">
-              {#if configStore.model.option_groups}
-                {#each configStore.model.option_groups as group}
-                  <OptionGroup {group} />
-                {/each}
-              {/if}
-            </div>
-
-            <!-- Sidebar -->
-            <div class="sidebar-panel">
-              <ValidationDisplay />
-              <PricingDisplay detailed={!embedMode} />
-
-              {#if configStore.completionPercentage === 100}
-                <ConfigurationSummary />
-              {/if}
-            </div>
-          </div>
-
-          <!-- Actions -->
-          <div class="configurator-actions">
-            <button
-                    type="button"
-                    class="btn btn-secondary"
-                    disabled={configStore.currentStep === 0}
-                    onclick={() => configStore.previousStep()}
-            >
-              Previous
-            </button>
-
-            <div class="action-group">
-              {#if configStore.isDirty}
-              <span class="save-indicator">
-                {#if configStore.lastSaved}
-                  Last saved {new Date(configStore.lastSaved).toLocaleTimeString()}
+                {#if hasAnyOptions}
+                  <div class="option-groups">
+                    {#each configStore.model.option_groups as group}
+                      <OptionGroup {group} />
+                    {/each}
+                  </div>
                 {:else}
-                  Unsaved changes
+                  <div class="no-options">
+                    <h3>⚠️ No Options Found</h3>
+                    <p>Groups exist but contain no options.</p>
+                    <p class="help">Check console for API details or use the debug test page.</p>
+                  </div>
                 {/if}
-              </span>
+              {:else}
+                <div class="no-options">
+                  <h3>⚠️ No Configuration Options Available</h3>
+                  <p>The model has no option groups configured.</p>
+                  <p class="help">Check the browser console for API response details.</p>
+                </div>
               {/if}
 
-              <button
-                      type="button"
-                      class="btn btn-primary"
-                      disabled={!configStore.canProceedToNextStep && configStore.currentStep < 3}
-                      onclick={() => {
-                if (configStore.currentStep === 3) {
-                  handleComplete();
-                } else {
-                  configStore.nextStep();
-                }
-              }}
-              >
-                {configStore.currentStep === 3 ? 'Complete' : 'Next'}
-              </button>
+              <div class="step-actions">
+                <button
+                        onclick={nextStep}
+                        disabled={!configStore.canProceedToNextStep}
+                        class="btn btn-primary"
+                >
+                  Continue to Validation
+                </button>
+              </div>
             </div>
-          </div>
-        {:else}
-          <div class="no-model">
-            <p>No model selected</p>
-          </div>
+
+          {:else if configStore.currentStep === 1}
+            <!-- Validation step -->
+            <div class="validation-step">
+              <h2>Configuration Validation</h2>
+
+              <ValidationDisplay />
+
+              <div class="step-actions">
+                <button onclick={prevStep} class="btn btn-secondary">
+                  Back
+                </button>
+                <button
+                        onclick={nextStep}
+                        disabled={!configStore.isValid}
+                        class="btn btn-primary"
+                >
+                  Continue to Pricing
+                </button>
+              </div>
+            </div>
+
+          {:else if configStore.currentStep === 2}
+            <!-- Pricing step -->
+            <div class="pricing-step">
+              <h2>Pricing Details</h2>
+
+              <PricingDisplay detailed={true} />
+
+              <div class="step-actions">
+                <button onclick={prevStep} class="btn btn-secondary">
+                  Back
+                </button>
+                <button onclick={nextStep} class="btn btn-primary">
+                  Continue to Summary
+                </button>
+              </div>
+            </div>
+
+          {:else if configStore.currentStep === 3}
+            <!-- Summary step -->
+            <div class="summary-step">
+              <h2>Configuration Summary</h2>
+
+              <ConfigurationSummary />
+
+              <div class="step-actions">
+                <button onclick={prevStep} class="btn btn-secondary">
+                  Back
+                </button>
+                <button onclick={handleComplete} class="btn btn-success">
+                  Complete Configuration
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Sidebar (desktop only) -->
+        {#if !embedMode}
+          <aside class="configurator-sidebar">
+            <div class="sidebar-section">
+              <h3>Current Selection</h3>
+              <div class="selected-items">
+                {#each configStore.selectedOptions as option}
+                  <div class="selected-item">
+                    <span>{option.name}</span>
+                    <span class="quantity">×{option.quantity}</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+
+            <div class="sidebar-section">
+              <h3>Pricing Summary</h3>
+              <PricingDisplay />
+            </div>
+
+            {#if configStore.validationResults.length > 0}
+              <div class="sidebar-section">
+                <h3>Issues</h3>
+                <ValidationDisplay compact={true} />
+              </div>
+            {/if}
+          </aside>
         {/if}
       </div>
-    {/snippet}
+    {/if}
   </ErrorBoundary>
 </div>
 
 <style>
-  .cpq-configurator {
-    --primary: #3b82f6;
-    --primary-hover: #2563eb;
-    --secondary: #6b7280;
-    --success: #10b981;
-    --warning: #f59e0b;
-    --error: #ef4444;
-    --bg: #ffffff;
-    --bg-secondary: #f9fafb;
-    --text: #111827;
-    --text-secondary: #6b7280;
-    --border: #e5e7eb;
-
+  .configurator-app {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text-primary, #1a1a1a);
+    background: var(--bg-primary, #ffffff);
     min-height: 100vh;
-    background: var(--bg);
-    color: var(--text);
   }
 
-  .cpq-configurator[data-theme="dark"] {
-    --bg: #111827;
-    --bg-secondary: #1f2937;
-    --text: #f9fafb;
-    --text-secondary: #9ca3af;
-    --border: #374151;
-  }
-
-  .embed-mode {
+  .configurator-app.embed-mode {
     min-height: auto;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
   }
 
-  .configurator-content {
-    max-width: 1280px;
+  .error-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    padding: 2rem;
+  }
+
+  .error-message {
+    text-align: center;
+    max-width: 400px;
+  }
+
+  .error-message h3 {
+    color: var(--error-color, #dc2626);
+    margin-bottom: 1rem;
+  }
+
+  .configurator-container {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
   }
 
-  .configurator-header {
+  @media (min-width: 1024px) {
+    .configurator-container {
+      grid-template-columns: 1fr 320px;
+    }
+  }
+
+  .configurator-content {
+    background: var(--bg-secondary, #f9fafb);
+    border-radius: 8px;
+    padding: 2rem;
+  }
+
+  .option-groups {
     display: flex;
-    justify-content: space-between;
-    align-items: start;
-    margin-bottom: 2rem;
-  }
-
-  .configurator-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0;
-  }
-
-  .configurator-description {
-    color: var(--text-secondary);
-    margin: 0.5rem 0 0;
-  }
-
-  .configurator-body {
-    display: grid;
-    grid-template-columns: 1fr 400px;
-    gap: 2rem;
+    flex-direction: column;
+    gap: 1.5rem;
     margin: 2rem 0;
   }
 
-  .configurator-body.compact {
-    grid-template-columns: 1fr;
+  .no-options {
+    padding: 3rem 2rem;
+    text-align: center;
+    background: var(--bg-secondary, #f9fafb);
+    border-radius: 8px;
+    margin: 2rem 0;
   }
 
-  .options-panel {
+  .no-options h3 {
+    color: var(--error-color, #dc2626);
+    margin-bottom: 1rem;
+  }
+
+  .no-options p {
+    color: var(--text-secondary, #6b7280);
+    margin-bottom: 0.5rem;
+  }
+
+  .no-options .help {
+    font-size: 0.875rem;
+    color: var(--text-tertiary, #9ca3af);
+  }
+
+  .step-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+  }
+
+  .configurator-sidebar {
+    display: none;
+  }
+
+  @media (min-width: 1024px) {
+    .configurator-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+  }
+
+  .sidebar-section {
+    background: var(--bg-secondary, #f9fafb);
+    border-radius: 8px;
+    padding: 1.5rem;
+  }
+
+  .sidebar-section h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary, #6b7280);
+    margin-bottom: 1rem;
+  }
+
+  .selected-items {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 0.5rem;
   }
 
-  .sidebar-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    position: sticky;
-    top: 2rem;
-    max-height: calc(100vh - 4rem);
-    overflow-y: auto;
-  }
-
-  .configurator-actions {
+  .selected-item {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding-top: 2rem;
-    border-top: 1px solid var(--border);
-  }
-
-  .action-group {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .save-indicator {
     font-size: 0.875rem;
-    color: var(--text-secondary);
   }
 
+  .quantity {
+    color: var(--text-secondary, #6b7280);
+  }
+
+  /* Button styles */
   .btn {
-    padding: 0.75rem 1.5rem;
-    border-radius: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 6px;
     font-weight: 500;
+    font-size: 0.875rem;
     border: none;
     cursor: pointer;
     transition: all 0.2s;
@@ -321,67 +391,29 @@
   }
 
   .btn-primary {
-    background: var(--primary);
+    background: var(--primary-color, #3b82f6);
     color: white;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--primary-hover);
+    background: var(--primary-hover, #2563eb);
   }
 
   .btn-secondary {
-    background: var(--bg-secondary);
-    color: var(--text);
-    border: 1px solid var(--border);
+    background: var(--secondary-color, #e5e7eb);
+    color: var(--text-primary, #1a1a1a);
   }
 
   .btn-secondary:hover:not(:disabled) {
-    background: var(--border);
+    background: var(--secondary-hover, #d1d5db);
   }
 
-  .no-model {
-    text-align: center;
-    padding: 4rem;
-    color: var(--text-secondary);
+  .btn-success {
+    background: var(--success-color, #10b981);
+    color: white;
   }
 
-  .error-state {
-    text-align: center;
-    padding: 4rem;
-    max-width: 400px;
-    margin: 0 auto;
-  }
-
-  .error-state .error-icon {
-    width: 3rem;
-    height: 3rem;
-    color: var(--warning);
-    margin: 0 auto 1rem;
-  }
-
-  .error-state h2 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem;
-  }
-
-  .error-state p {
-    color: var(--text-secondary);
-    margin: 0 0 0.5rem;
-  }
-
-  .error-state .error-details {
-    font-size: 0.875rem;
-  }
-
-  @media (max-width: 768px) {
-    .configurator-body {
-      grid-template-columns: 1fr;
-    }
-
-    .sidebar-panel {
-      position: static;
-      max-height: none;
-    }
+  .btn-success:hover:not(:disabled) {
+    background: var(--success-hover, #059669);
   }
 </style>

@@ -29,30 +29,30 @@ func (s *Server) setupConfigurationRoutes(router *mux.Router) {
 	handlers := NewConfigurationHandlers(s.cpqService)
 
 	// Configuration CRUD operations
-	router.HandleFunc("", handlers.CreateConfiguration).Methods("POST")
-	router.HandleFunc("/{id}", handlers.GetConfiguration).Methods("GET")
-	router.HandleFunc("/{id}", handlers.UpdateConfiguration).Methods("PUT")
-	router.HandleFunc("/{id}", handlers.PatchConfiguration).Methods("PATCH")
-	router.HandleFunc("/{id}", handlers.DeleteConfiguration).Methods("DELETE")
+	router.HandleFunc("", handlers.CreateConfiguration).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.GetConfiguration).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.UpdateConfiguration).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.PatchConfiguration).Methods("PATCH", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.DeleteConfiguration).Methods("DELETE", "OPTIONS")
 
 	// Configuration operations
-	router.HandleFunc("/{id}/validate", handlers.ValidateCurrentConfiguration).Methods("POST")
-	router.HandleFunc("/{id}/price", handlers.CalculatePrice).Methods("POST")
-	router.HandleFunc("/{id}/summary", handlers.GetConfigurationSummary).Methods("GET")
-	router.HandleFunc("/{id}/clone", handlers.CloneConfiguration).Methods("POST")
+	router.HandleFunc("/{id}/validate", handlers.ValidateCurrentConfiguration).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/price", handlers.CalculatePrice).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/summary", handlers.GetConfigurationSummary).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/clone", handlers.CloneConfiguration).Methods("POST", "OPTIONS")
 
 	// Selection management
-	router.HandleFunc("/{id}/selections", handlers.AddSelections).Methods("POST")
-	router.HandleFunc("/{id}/selections/{option_id}", handlers.UpdateSelection).Methods("PUT")
-	router.HandleFunc("/{id}/selections/{option_id}", handlers.RemoveSelection).Methods("DELETE")
-	router.HandleFunc("/{id}/available-options", handlers.GetAvailableOptions).Methods("GET")
-	router.HandleFunc("/{id}/constraints", handlers.GetConstraints).Methods("GET")
+	router.HandleFunc("/{id}/selections", handlers.AddSelections).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/selections/{option_id}", handlers.UpdateSelection).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}/selections/{option_id}", handlers.RemoveSelection).Methods("DELETE", "OPTIONS")
+	router.HandleFunc("/{id}/available-options", handlers.GetAvailableOptions).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/constraints", handlers.GetConstraints).Methods("GET", "OPTIONS")
 
 	// Bulk operations
-	router.HandleFunc("/{id}/bulk-selections", handlers.BulkSelections).Methods("POST")
+	router.HandleFunc("/{id}/bulk-selections", handlers.BulkSelections).Methods("POST", "OPTIONS")
 
 	// Real-time validation (standalone endpoint)
-	router.HandleFunc("/validate-selection", handlers.ValidateSelection).Methods("POST")
+	router.HandleFunc("/validate-selection", handlers.ValidateSelection).Methods("POST", "OPTIONS")
 }
 
 // Configuration CRUD Operations
