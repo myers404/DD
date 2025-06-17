@@ -4,7 +4,7 @@ class ConfiguratorApiClient {
     this.baseUrl = baseUrl || window.__API_BASE_URL__ || 'http://localhost:8080/api/v1';
     this.modelId = options.modelId;
     this.authToken = options.authToken || localStorage.getItem('auth_token');
-    this.timeout = options.timeout || 10000;
+    this.timeout = options.timeout || 30000;
 
     console.log('API Client initialized:', {
       baseUrl: this.baseUrl,
@@ -14,18 +14,11 @@ class ConfiguratorApiClient {
   }
 
   async request(endpoint, options = {}) {
-    // Ensure endpoint starts with /
-    if (!endpoint.startsWith('/')) {
-      endpoint = '/' + endpoint;
-    }
-
     const url = `${this.baseUrl}${endpoint}`;
-    console.log('API Request:', options.method || 'GET', url);
+    console.log(`API Request: ${options.method || 'GET'} ${url}`);
 
     const config = {
       method: 'GET',
-      mode: 'cors',
-      credentials: 'omit',
       headers: {
         'Content-Type': 'application/json',
         ...(this.authToken && { 'Authorization': `Bearer ${this.authToken}` }),
@@ -50,118 +43,81 @@ class ConfiguratorApiClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.message || errorJson.error || errorMessage;
-        } catch (e) {
-          // If not JSON, use the text if it's not HTML
-          if (!errorText.includes('<html')) {
-            errorMessage = errorText || errorMessage;
-          }
-        }
-
-        console.error(`API Error from ${endpoint}:`, errorMessage);
-
-        if (response.status === 404) {
-          throw new Error(`Endpoint not found: ${url}. Please check if the backend server is running and the API path is correct.`);
-        }
-
-        throw new Error(errorMessage);
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(errorData.message || errorData.error || `HTTP ${response.status}`);
       }
 
       const result = await response.json();
-      console.log(`API Response from ${endpoint}:`, result);
 
-      // Extract data from response wrapper
-      // Backend returns { success: true, data: {...}, meta: {...} }
-      if (result.success !== undefined) {
-        // This is a wrapped response
-        if (result.success && result.data !== undefined) {
-          return result.data;
-        } else if (!result.success) {
-          throw new Error(result.error || result.message || 'Request failed');
-        }
+      // Debug logging for development
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        console.log(`API Response from ${endpoint}:`, result);
       }
 
-      // Some endpoints might return data directly or in different structures
-      // Log what we got to help debug
-      if (endpoint.includes('/groups') || endpoint.includes('/options')) {
-        console.log(`Note: ${endpoint} returned unwrapped response, structure:`,
-            Array.isArray(result) ? 'Array' : typeof result,
-            'Keys:', result ? Object.keys(result).slice(0, 5) : 'none'
-        );
+      // Handle wrapped responses from backend
+      if (result && typeof result === 'object' && result.success !== undefined && result.data !== undefined) {
+        return result.data;
       }
 
-      // For endpoints that might return unwrapped data
-      return result;
+      // Return result or empty array/object for safety
+      return result ?? (endpoint.includes('/groups') || endpoint.includes('/options') || endpoint.includes('/rules') ? [] : {});
     } catch (error) {
       if (error.name === 'AbortError') {
         throw new Error('Request timeout');
       }
+      console.error(`API Error for ${endpoint}:`, error);
       throw error;
     }
-  }
-
-  setAuthToken(token) {
-    this.authToken = token;
-    if (token) {
-      localStorage.setItem('auth_token', token);
-    } else {
-      localStorage.removeItem('auth_token');
-    }
-  }
-
-  // Authentication
-  async login(username, password) {
-    const response = await this.request('/auth/login', {
-      method: 'POST',
-      body: { username, password }
-    });
-    if (response.token) {
-      this.setAuthToken(response.token);
-    }
-    return response;
-  }
-
-  async validateToken() {
-    return this.request('/auth/validate', { method: 'POST' });
   }
 
   // Model Management
   async getModel() {
     if (!this.modelId) throw new Error('Model ID required');
-    const response = await this.request(`/models/${this.modelId}`);
-    console.log('getModel response:', response);
+    const model = await this.request(`/models/${this.modelId}`);
 
-    // If the model doesn't have option_groups but has an ID, try to fetch them
-    if (response && response.id && !response.option_groups && !response.groups) {
-      try {
-        const options = await this.getModelOptions();
-        response.options = options;
-      } catch (e) {
-        console.warn('Failed to fetch model options separately:', e);
-      }
+    // Ensure we have proper structure
+    if (!model.option_groups && model.groups) {
+      model.option_groups = model.groups;
     }
 
-    return response;
+    // Log the model structure for debugging
+    console.log('Model structure:', {
+      hasGroups: !!model.groups,
+      hasOptionGroups: !!model.option_groups,
+      hasOptions: !!model.options,
+      groupsCount: model.groups?.length || model.option_groups?.length || 0,
+      optionsCount: model.options?.length || 0
+    });
+
+    return model;
+  }
+
+  async getModelGroups() {
+    if (!this.modelId) throw new Error('Model ID required');
+    const response = await this.request(`/models/${this.modelId}/groups`);
+    // Ensure we return an array
+    return Array.isArray(response) ? response : [];
   }
 
   async getModelOptions() {
     if (!this.modelId) throw new Error('Model ID required');
     const response = await this.request(`/models/${this.modelId}/options`);
-    console.log('getModelOptions response:', response);
-    return response;
+    // Ensure we return an array
+    return Array.isArray(response) ? response : [];
   }
 
-  async getModelGroups() {
+  async getModelRules() {
     if (!this.modelId) throw new Error('Model ID required');
-    // Try to get groups with options included
-    const response = await this.request(`/models/${this.modelId}/groups?include=options`);
-    console.log('getModelGroups response:', response);
-    return response;
+    const response = await this.request(`/models/${this.modelId}/rules`);
+    // Ensure we return an array
+    return Array.isArray(response) ? response : [];
+  }
+
+  async getModelPricingRules() {
+    if (!this.modelId) throw new Error('Model ID required');
+    const response = await this.request(`/models/${this.modelId}/pricing-rules`);
+    // Ensure we return an array
+    return Array.isArray(response) ? response : [];
   }
 
   async getModelStatistics() {
@@ -170,8 +126,39 @@ class ConfiguratorApiClient {
   }
 
   // Configuration Management
-  async createConfiguration(selections = {}) {
+  async createConfiguration(selections = []) {
     return this.request('/configurations', {
+      method: 'POST',
+      body: {
+        model_id: this.modelId,
+        name: `Configuration ${new Date().toISOString()}`,
+      }
+    });
+  }
+
+  async getConfiguration(configId) {
+    return this.request(`/configurations/${configId}`);
+  }
+
+  async updateConfiguration(configId, updates) {
+    return this.request(`/configurations/${configId}`, {
+      method: 'PUT',
+      body: {
+        model_id: this.modelId,
+        ...updates,
+        selections: updates.selections ? this.formatSelections(updates.selections) : undefined
+      }
+    });
+  }
+
+  async deleteConfiguration(configId) {
+    return this.request(`/configurations/${configId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async addSelections(configId, selections) {
+    return this.request(`/configurations/${configId}/selections`, {
       method: 'POST',
       body: {
         model_id: this.modelId,
@@ -180,17 +167,15 @@ class ConfiguratorApiClient {
     });
   }
 
-  async getConfiguration(configId) {
-    return this.request(`/configurations/${configId}?model_id=${this.modelId}`);
+  async removeSelection(configId, optionId) {
+    return this.request(`/configurations/${configId}/selections/${optionId}`, {
+      method: 'DELETE'
+    });
   }
 
-  async updateConfiguration(configId, selections) {
-    return this.request(`/configurations/${configId}`, {
-      method: 'PUT',
-      body: {
-        model_id: this.modelId,
-        selections: this.formatSelections(selections)
-      }
+  async validateConfiguration(configId) {
+    return this.request(`/configurations/${configId}/validate`, {
+      method: 'POST'
     });
   }
 
@@ -205,11 +190,25 @@ class ConfiguratorApiClient {
   }
 
   async getAvailableOptions(configId) {
-    return this.request(`/configurations/${configId}/available-options?model_id=${this.modelId}`);
+    return this.request(`/configurations/${configId}/available-options`);
   }
 
-  // Pricing
-  async calculatePricing(selections, context = {}) {
+  async getConstraints(configId) {
+    return this.request(`/configurations/${configId}/constraints`);
+  }
+
+  async getConfigurationSummary(configId) {
+    return this.request(`/configurations/${configId}/summary`);
+  }
+
+  async cloneConfiguration(configId) {
+    return this.request(`/configurations/${configId}/clone`, {
+      method: 'POST'
+    });
+  }
+
+  // Pricing Operations
+  async calculatePrice(selections, context = {}) {
     return this.request('/pricing/calculate', {
       method: 'POST',
       body: {
@@ -218,10 +217,6 @@ class ConfiguratorApiClient {
         context
       }
     });
-  }
-
-  async getVolumeTiers() {
-    return this.request(`/pricing/volume-tiers/${this.modelId}`);
   }
 
   async simulatePricing(scenarios) {
@@ -234,14 +229,102 @@ class ConfiguratorApiClient {
     });
   }
 
-  // Utility methods
+  async validatePricing(selections, expectedPrice) {
+    return this.request('/pricing/validate', {
+      method: 'POST',
+      body: {
+        model_id: this.modelId,
+        selections: this.formatSelections(selections),
+        expected_price: expectedPrice
+      }
+    });
+  }
+
+  async getPricingRules() {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/pricing/rules/${this.modelId}`);
+  }
+
+  async getVolumeTiers() {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/pricing/volume-tiers/${this.modelId}`);
+  }
+
+  // Model Builder Operations
+  async validateModel() {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/models/${this.modelId}/validate`, {
+      method: 'POST'
+    });
+  }
+
+  async detectConflicts(ruleIds = []) {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/models/${this.modelId}/conflicts`, {
+      method: 'POST',
+      body: { rule_ids: ruleIds }
+    });
+  }
+
+  async analyzeImpact(changes) {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/models/${this.modelId}/impact`, {
+      method: 'POST',
+      body: changes
+    });
+  }
+
+  async getModelQuality() {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/models/${this.modelId}/quality`, {
+      method: 'POST'
+    });
+  }
+
+  async getOptimizationRecommendations() {
+    if (!this.modelId) throw new Error('Model ID required');
+    return this.request(`/models/${this.modelId}/optimize`, {
+      method: 'POST'
+    });
+  }
+
+  // Utility Methods
   formatSelections(selections) {
+    if (Array.isArray(selections)) {
+      return selections;
+    }
+
+    // Convert object format to array format
     return Object.entries(selections)
         .filter(([_, quantity]) => quantity > 0)
         .map(([option_id, quantity]) => ({
           option_id,
-          quantity
+          quantity: parseInt(quantity) || 1
         }));
+  }
+
+  // Batch Operations
+  async batchValidate(configurations) {
+    return this.request('/configurations/validate', {
+      method: 'POST',
+      body: { configurations }
+    });
+  }
+
+  async bulkCalculatePricing(configurations) {
+    return this.request('/pricing/bulk-calculate', {
+      method: 'POST',
+      body: { configurations }
+    });
+  }
+
+  // Health Check
+  async checkHealth() {
+    return this.request('/health');
+  }
+
+  async getStatus() {
+    return this.request('/status');
   }
 }
 

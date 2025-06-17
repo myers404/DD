@@ -3,333 +3,234 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CPQ API Debug Test</title>
+    <title>CPQ Configurator Debug Test</title>
     <style>
         body {
-            font-family: monospace;
-            padding: 20px;
-            max-width: 800px;
+            font-family: system-ui, -apple-system, sans-serif;
+            padding: 2rem;
+            max-width: 1200px;
             margin: 0 auto;
         }
-        .test {
-            margin: 10px 0;
-            padding: 10px;
-            border: 1px solid #ccc;
+
+        .debug-section {
+            margin: 2rem 0;
+            padding: 1rem;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+
+        .debug-section h2 {
+            margin: 0 0 1rem;
+            color: #333;
+        }
+
+        .log-output {
+            background: #1e1e1e;
+            color: #fff;
+            padding: 1rem;
             border-radius: 4px;
-        }
-        .success {
-            background-color: #d4edda;
-            border-color: #c3e6cb;
-        }
-        .error {
-            background-color: #f8d7da;
-            border-color: #f5c6cb;
-        }
-        .pending {
-            background-color: #fff3cd;
-            border-color: #ffeeba;
-        }
-        pre {
+            font-family: monospace;
+            font-size: 0.875rem;
+            max-height: 300px;
+            overflow-y: auto;
             white-space: pre-wrap;
-            word-wrap: break-word;
         }
+
+        .test-buttons {
+            display: flex;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
         button {
-            margin: 5px;
-            padding: 10px 15px;
+            padding: 0.5rem 1rem;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 4px;
             cursor: pointer;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background: #2563eb;
+        }
+
+        #configurator {
+            min-height: 600px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            margin-top: 2rem;
         }
     </style>
 </head>
 <body>
-<h1>CPQ API Debug Test</h1>
-<p style="color: #666;">Tests real backend API endpoints - no mock data. Ensure backend server is running.</p>
+<h1>CPQ Configurator Debug Test</h1>
 
-<div>
-    <label>API Base URL:
-        <input type="text" id="apiUrl" value="http://localhost:8080/api/v1" style="width: 300px;">
-    </label>
-    <label>Model ID:
-        <input type="text" id="modelId" value="sample-laptop" style="width: 200px;">
-    </label>
+<div class="debug-section">
+    <h2>Test Controls</h2>
+    <div class="test-buttons">
+        <button onclick="testModelLoad()">Test Model Load</button>
+        <button onclick="inspectStore()">Inspect Store</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+        <button onclick="reloadConfigurator()">Reload Configurator</button>
+    </div>
 </div>
 
-<div style="margin: 20px 0;">
-    <button onclick="testHealth()">Test Health</button>
-    <button onclick="testListModels()">List All Models</button>
-    <button onclick="testModel()">Test Get Model</button>
-    <button onclick="testGroups()">Test Get Groups</button>
-    <button onclick="testGroupsWithOptions()">Test Groups with Options</button>
-    <button onclick="testOptions()">Test Get Options</button>
-    <button onclick="testValidation()">Test Validation</button>
-    <button onclick="testCreateConfig()">Test Create Config</button>
-    <button onclick="clearTests()">Clear</button>
+<div class="debug-section">
+    <h2>Console Output</h2>
+    <div id="log-output" class="log-output"></div>
 </div>
 
-<div id="results"></div>
+<div id="configurator"></div>
 
 <script>
-    const results = document.getElementById('results');
+    // Capture console logs
+    const logOutput = document.getElementById('log-output');
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
 
-    function getApiUrl() {
-        return document.getElementById('apiUrl').value;
+    function addLog(type, ...args) {
+        const timestamp = new Date().toLocaleTimeString();
+        const message = args.map(arg =>
+            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+        ).join(' ');
+
+        const color = type === 'error' ? '#ff6b6b' :
+            type === 'warn' ? '#ffd93d' : '#4ecdc4';
+
+        logOutput.innerHTML += `<div style="color: ${color}">[${timestamp}] ${type.toUpperCase()}: ${message}</div>\n`;
+        logOutput.scrollTop = logOutput.scrollHeight;
     }
 
-    function getModelId() {
-        return document.getElementById('modelId').value;
+    console.log = function(...args) {
+        originalLog.apply(console, args);
+        addLog('log', ...args);
+    };
+
+    console.error = function(...args) {
+        originalError.apply(console, args);
+        addLog('error', ...args);
+    };
+
+    console.warn = function(...args) {
+        originalWarn.apply(console, args);
+        addLog('warn', ...args);
+    };
+
+    // Test functions
+    function clearLogs() {
+        logOutput.innerHTML = '';
     }
 
-    function addResult(test, status, data) {
-        const div = document.createElement('div');
-        div.className = `test ${status}`;
-        div.innerHTML = `
-        <strong>${test}</strong>
-        <pre>${JSON.stringify(data, null, 2)}</pre>
-      `;
-        results.appendChild(div);
-    }
+    async function testModelLoad() {
+        console.log('Testing model load...');
 
-    function clearTests() {
-        results.innerHTML = '';
-    }
-
-    async function testListModels() {
-        const url = `${getApiUrl()}/models`;
         try {
-            const response = await fetch(url);
+            const response = await fetch('http://localhost:8080/api/v1/models/laptop-model-123');
             const data = await response.json();
+            console.log('Model response:', data);
 
-            let modelIds = [];
-            if (data.data?.models) {
-                modelIds = data.data.models.map(m => m.id);
-            } else if (data.models) {
-                modelIds = data.models.map(m => m.id);
-            } else if (Array.isArray(data)) {
-                modelIds = data.map(m => m.id);
-            }
+            // Test groups endpoint
+            const groupsResponse = await fetch('http://localhost:8080/api/v1/models/laptop-model-123/groups');
+            const groupsData = await groupsResponse.json();
+            console.log('Groups response:', groupsData);
 
-            addResult('List Models', response.ok ? 'success' : 'error', {
-                url,
-                status: response.status,
-                availableModelIds: modelIds,
-                fullResponse: data
-            });
+            // Test options endpoint
+            const optionsResponse = await fetch('http://localhost:8080/api/v1/models/laptop-model-123/options');
+            const optionsData = await optionsResponse.json();
+            console.log('Options response:', optionsData);
 
-            // If models found, update the model ID input with the first one
-            if (modelIds.length > 0) {
-                document.getElementById('modelId').value = modelIds[0];
-            }
         } catch (error) {
-            addResult('List Models', 'error', {
-                url,
-                error: error.message
-            });
+            console.error('Test failed:', error);
         }
     }
 
-    async function testHealth() {
-        const url = `${getApiUrl()}/health`;
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
-            addResult('Health Check', response.ok ? 'success' : 'error', {
-                url,
-                status: response.status,
-                data
+    function inspectStore() {
+        if (window.widget && window.widget.store) {
+            const store = window.widget.store;
+            console.log('Store state:', {
+                modelId: store.modelId,
+                model: store.model,
+                groups: store.groups,
+                options: store.options,
+                groupsIsArray: Array.isArray(store.groups),
+                optionsIsArray: Array.isArray(store.options),
+                groupsLength: store.groups?.length,
+                optionsLength: store.options?.length,
+                selections: store.selections,
+                isLoading: store.isLoading,
+                error: store.error
             });
-        } catch (error) {
-            addResult('Health Check', 'error', {
-                url,
-                error: error.message
-            });
+        } else {
+            console.warn('Widget not initialized yet');
         }
     }
 
-    async function testModel() {
-        const url = `${getApiUrl()}/models/${getModelId()}`;
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
-            addResult('Get Model', response.ok ? 'success' : 'error', {
-                url,
-                status: response.status,
-                data
-            });
-        } catch (error) {
-            addResult('Get Model', 'error', {
-                url,
-                error: error.message
-            });
+    function reloadConfigurator() {
+        if (window.widget) {
+            window.widget.destroy();
         }
+
+        console.log('Reloading configurator...');
+        loadConfigurator();
     }
 
-    async function testGroups() {
-        const url = `${getApiUrl()}/models/${getModelId()}/groups`;
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
+    // Load configurator
+    let widget;
 
-            let groups = [];
-            let optionCount = 0;
-
-            // Extract groups from different possible structures
-            if (data?.data?.groups) {
-                groups = data.data.groups;
-            } else if (data?.data && Array.isArray(data.data)) {
-                groups = data.data;
-            } else if (data?.groups) {
-                groups = data.groups;
-            } else if (data?.option_groups) {
-                groups = data.option_groups;
-            } else if (Array.isArray(data)) {
-                groups = data;
-            }
-
-            // Count options
-            groups.forEach(g => {
-                if (g.options) optionCount += g.options.length;
-                else if (g.Options) optionCount += g.Options.length;
-                else if (g.items) optionCount += g.items.length;
-            });
-
-            addResult('Get Groups', response.ok ? 'success' : 'error', {
-                url,
-                status: response.status,
-                groupCount: groups.length,
-                totalOptions: optionCount,
-                groupNames: groups.map(g => g.name || g.Name || 'unnamed'),
-                sampleGroup: groups[0] || 'No groups',
-                fullResponse: data
-            });
-        } catch (error) {
-            addResult('Get Groups', 'error', {
-                url,
-                error: error.message
-            });
+    function loadConfigurator() {
+        // Wait for the widget script to load
+        if (typeof CPQConfigurator === 'undefined') {
+            console.error('CPQConfigurator not loaded. Include the widget script first.');
+            return;
         }
-    }
-
-    async function testGroupsWithOptions() {
-        const url = `${getApiUrl()}/models/${getModelId()}/groups?include=options`;
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
-            addResult('Get Groups with Options', response.ok ? 'success' : 'error', {
-                url,
-                status: response.status,
-                data
-            });
-        } catch (error) {
-            addResult('Get Groups with Options', 'error', {
-                url,
-                error: error.message
-            });
-        }
-    }
-
-    async function testOptions() {
-        const url = `${getApiUrl()}/models/${getModelId()}/options`;
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
-
-            let options = [];
-
-            // Extract options from different possible structures
-            if (data?.data?.options) {
-                options = data.data.options;
-            } else if (data?.data && Array.isArray(data.data)) {
-                options = data.data;
-            } else if (data?.options) {
-                options = data.options;
-            } else if (Array.isArray(data)) {
-                options = data;
-            }
-
-            addResult('Get Options', response.ok ? 'success' : 'error', {
-                url,
-                status: response.status,
-                optionsCount: options.length,
-                sampleOption: options[0] || 'No options',
-                optionProperties: options.length > 0 ? Object.keys(options[0]) : [],
-                groupIds: [...new Set(options.map(o => o.group_id || o.groupId || o.group || 'unknown'))],
-                fullResponse: data
-            });
-        } catch (error) {
-            addResult('Get Options', 'error', {
-                url,
-                error: error.message
-            });
-        }
-    }
-
-    async function testValidation() {
-        const url = `${getApiUrl()}/configurations/validate-selection`;
-        const body = {
-            model_id: getModelId(),
-            selections: []
-        };
 
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
+            widget = CPQConfigurator.create('#configurator', {
+                modelId: 'laptop-model-123',
+                apiUrl: 'http://localhost:8080/api/v1',
+                theme: 'light',
+                onComplete: (config) => {
+                    console.log('Configuration completed:', config);
                 },
-                body: JSON.stringify(body)
-            });
-            const data = await response.json();
-            addResult('Validate Selection', response.ok ? 'success' : 'error', {
-                url,
-                method: 'POST',
-                body,
-                status: response.status,
-                data
-            });
-        } catch (error) {
-            addResult('Validate Selection', 'error', {
-                url,
-                method: 'POST',
-                body,
-                error: error.message
-            });
-        }
-    }
-
-    async function testCreateConfig() {
-        const url = `${getApiUrl()}/configurations`;
-        const body = {
-            model_id: getModelId(),
-            selections: []
-        };
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
+                onConfigurationChange: (config) => {
+                    console.log('Configuration changed:', config);
                 },
-                body: JSON.stringify(body)
+                onError: (error) => {
+                    console.error('Configuration error:', error);
+                }
             });
-            const data = await response.json();
-            addResult('Create Configuration', response.ok ? 'success' : 'error', {
-                url,
-                method: 'POST',
-                body,
-                status: response.status,
-                data
-            });
+
+            window.widget = widget;
+            console.log('Configurator loaded successfully');
+
         } catch (error) {
-            addResult('Create Configuration', 'error', {
-                url,
-                method: 'POST',
-                body,
-                error: error.message
-            });
+            console.error('Failed to load configurator:', error);
         }
     }
 
-    // Run health check on load
-    testHealth();
+    // Load on page ready
+    window.addEventListener('DOMContentLoaded', () => {
+        console.log('Page loaded, initializing...');
+
+        // Check if running locally
+        if (window.location.protocol === 'file:') {
+            addLog('warn', 'Running from file:// protocol. Make sure to run from a local server (e.g., npm run dev)');
+        }
+
+        // Try to load configurator after a short delay
+        setTimeout(loadConfigurator, 100);
+    });
+
+    // Add global error handler
+    window.addEventListener('error', (event) => {
+        console.error('Global error:', event.error);
+    });
 </script>
+
+<!-- Include the widget script -->
+<script src="/dist-widget/cpq-widget.js"></script>
 </body>
 </html>

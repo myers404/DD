@@ -1,91 +1,124 @@
 <!-- web/src/lib/components/OptionCard.svelte -->
 <script>
-  import { configStore } from '../stores/configuration.svelte.js';
+  import SafeText from './SafeText.svelte';
+  import { sanitizeText } from '../utils/sanitizer.js';
 
-  let { option, group } = $props();
+  let {
+    option,
+    selected = false,
+    quantity = 0,
+    disabled = false,
+    available = true,
+    selectionType = 'multiple',
+    maxQuantity = 10,
+    onChange
+  } = $props();
 
-  let quantity = $derived(configStore.selections[option.id] || 0);
-  let isSelected = $derived(quantity > 0);
-  let isAvailable = $derived(
-          !configStore.availableOptions.length ||
-          configStore.availableOptions.some(opt => opt.option_id === option.id)
-  );
+  function handleToggle() {
+    if (disabled) return;
 
-  let totalPrice = $derived(quantity * (option.base_price || 0));
-
-  function getMaxQuantity() {
-    if (group.selection_type === 'single') return 1;
-    return group.max_selections || 10;
+    if (selectionType === 'single') {
+      onChange(selected ? 0 : 1);
+    } else {
+      onChange(selected ? 0 : 1);
+    }
   }
 
-  function updateQuantity(newQty) {
-    if (!isAvailable && newQty > 0) return;
-    configStore.updateSelection(option.id, newQty);
+  function handleQuantityChange(newQuantity) {
+    if (disabled) return;
+
+    const qty = Math.max(0, Math.min(newQuantity, maxQuantity));
+    onChange(qty);
   }
 
   function increment() {
-    if (quantity < getMaxQuantity()) {
-      updateQuantity(quantity + 1);
-    }
+    handleQuantityChange(quantity + 1);
   }
 
   function decrement() {
-    if (quantity > 0) {
-      updateQuantity(quantity - 1);
-    }
+    handleQuantityChange(quantity - 1);
   }
 
-  function toggle() {
-    updateQuantity(isSelected ? 0 : 1);
-  }
+  let formattedPrice = $derived(
+          option.price ? `$${option.price.toFixed(2)}` : 'Included'
+  );
+
+  let totalPrice = $derived(
+          quantity > 1 && option.price ? `$${(option.price * quantity).toFixed(2)} total` : ''
+  );
 </script>
 
 <div
         class="option-card"
-        class:selected={isSelected}
-        class:unavailable={!isAvailable}
+        class:selected
+        class:disabled
+        class:unavailable={!available}
+        role="button"
+        tabindex={disabled ? -1 : 0}
+        onclick={selectionType === 'single' ? handleToggle : undefined}
+        onkeydown={(e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleToggle();
+    }
+  }}
 >
   <div class="option-header">
-    <h4>{option.name}</h4>
-    {#if option.sku}
-      <span class="sku">SKU: {option.sku}</span>
+    {#if selectionType === 'single'}
+      <input
+              type="radio"
+              checked={selected}
+              {disabled}
+              onchange={handleToggle}
+              onclick={(e) => e.stopPropagation()}
+              class="radio-input"
+      />
+    {:else}
+      <input
+              type="checkbox"
+              checked={selected}
+              {disabled}
+              onchange={handleToggle}
+              onclick={(e) => e.stopPropagation()}
+              class="checkbox-input"
+      />
     {/if}
+
+    <div class="option-info">
+      <SafeText text={option.name} fallback="Unnamed Option" tag="h4" class="option-name" />
+      {#if option.sku}
+        <span class="option-sku">SKU: {option.sku}</span>
+      {/if}
+    </div>
+
+    <div class="option-price">
+      <span class="price">{formattedPrice}</span>
+      {#if totalPrice}
+        <span class="total-price">{totalPrice}</span>
+      {/if}
+    </div>
   </div>
 
   {#if option.description}
-    <p class="description">{option.description}</p>
+    <SafeText text={option.description} tag="p" class="option-description" />
   {/if}
 
-  <div class="price-section">
-    <span class="base-price">
-      ${(option.base_price || 0).toFixed(2)}
-      {#if quantity > 1}
-        <span class="price-each">each</span>
-      {/if}
-    </span>
-    {#if quantity > 1}
-      <span class="total-price">
-        Total: ${totalPrice.toFixed(2)}
-      </span>
-    {/if}
-  </div>
+  {#if option.features && option.features.length > 0}
+    <ul class="option-features">
+      {#each option.features as feature}
+        <li><SafeText text={feature} tag="span" /></li>
+      {/each}
+    </ul>
+  {/if}
 
-  <div class="actions">
-    {#if group.selection_type === 'single'}
-      <button
-              class="select-button"
-              class:selected={isSelected}
-              onclick={toggle}
-              disabled={!isAvailable}
-      >
-        {isSelected ? '✓ Selected' : 'Select'}
-      </button>
-    {:else}
-      <div class="quantity-controls">
+  {#if selectionType === 'multiple' && selected}
+    <div class="quantity-controls" onclick={(e) => e.stopPropagation()}>
+      <label class="quantity-label">Quantity:</label>
+      <div class="quantity-input">
         <button
-                class="qty-button"
+                class="qty-btn"
                 onclick={decrement}
-                disabled={quantity === 0}
+                disabled={disabled || quantity <= 1}
                 aria-label="Decrease quantity"
         >
           −
@@ -93,44 +126,52 @@
         <input
                 type="number"
                 value={quantity}
-                min="0"
-                max={getMaxQuantity()}
-                onchange={(e) => updateQuantity(parseInt(e.target.value) || 0)}
-                disabled={!isAvailable}
-                aria-label="Quantity"
+                min="1"
+                max={maxQuantity}
+                {disabled}
+                onchange={(e) => handleQuantityChange(parseInt(e.target.value) || 0)}
+                onclick={(e) => e.stopPropagation()}
+                class="qty-value"
         />
         <button
-                class="qty-button"
+                class="qty-btn"
                 onclick={increment}
-                disabled={quantity >= getMaxQuantity() || !isAvailable}
+                disabled={disabled || quantity >= maxQuantity}
                 aria-label="Increase quantity"
         >
           +
         </button>
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 
-  {#if !isAvailable && !isSelected}
-    <div class="unavailable-overlay">
-      <span>Not available with current selection</span>
+  {#if !available && !disabled}
+    <div class="unavailable-message">
+      Not available with current selections
+    </div>
+  {/if}
+
+  {#if disabled && available}
+    <div class="disabled-message">
+      Maximum selections reached for this group
     </div>
   {/if}
 </div>
 
 <style>
   .option-card {
-    position: relative;
-    background: white;
+    background: var(--bg-primary, #ffffff);
     border: 2px solid var(--border-color, #e5e7eb);
     border-radius: 8px;
-    padding: 1.25rem;
+    padding: 1rem;
     transition: all 0.2s;
+    cursor: pointer;
+    position: relative;
   }
 
-  .option-card:hover:not(.unavailable) {
-    border-color: var(--primary-light, #93bbfc);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  .option-card:hover:not(.disabled):not(.unavailable) {
+    border-color: var(--primary-color, #3b82f6);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   }
 
   .option-card.selected {
@@ -138,147 +179,175 @@
     background: var(--primary-bg, #eff6ff);
   }
 
+  .option-card.disabled,
   .option-card.unavailable {
     opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .option-header {
     display: flex;
-    justify-content: space-between;
-    align-items: start;
-    margin-bottom: 0.5rem;
+    align-items: flex-start;
+    gap: 0.75rem;
   }
 
-  .option-header h4 {
+  .radio-input,
+  .checkbox-input {
+    margin-top: 0.125rem;
+    flex-shrink: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+  }
+
+  .radio-input:disabled,
+  .checkbox-input:disabled {
+    cursor: not-allowed;
+  }
+
+  .option-info {
+    flex: 1;
+  }
+
+  .option-name {
+    margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: var(--text-primary, #1a1a1a);
-    margin: 0;
+    color: var(--text-primary, #111827);
   }
 
-  .sku {
+  .option-sku {
     font-size: 0.75rem;
     color: var(--text-tertiary, #9ca3af);
+    margin-top: 0.125rem;
+    display: inline-block;
   }
 
-  .description {
-    font-size: 0.875rem;
-    color: var(--text-secondary, #6b7280);
-    margin: 0 0 1rem;
-    line-height: 1.5;
-  }
-
-  .price-section {
+  .option-price {
+    text-align: right;
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 1rem;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.125rem;
   }
 
-  .base-price {
-    font-size: 1.25rem;
+  .price {
+    font-size: 1.125rem;
     font-weight: 600;
     color: var(--primary-color, #3b82f6);
-  }
-
-  .price-each {
-    font-size: 0.75rem;
-    font-weight: 400;
-    color: var(--text-secondary, #6b7280);
   }
 
   .total-price {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #6b7280);
+  }
+
+  .option-description {
+    margin: 0.75rem 0 0 2rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary, #6b7280);
+    line-height: 1.5;
+  }
+
+  .option-features {
+    margin: 0.75rem 0 0 2rem;
+    padding: 0;
+    list-style: none;
     font-size: 0.875rem;
     color: var(--text-secondary, #6b7280);
   }
 
-  .actions {
-    margin-top: auto;
+  .option-features li {
+    position: relative;
+    padding-left: 1.25rem;
+    margin-bottom: 0.25rem;
   }
 
-  .select-button {
-    width: 100%;
-    padding: 0.625rem 1rem;
-    border: 2px solid var(--primary-color, #3b82f6);
-    border-radius: 6px;
-    background: white;
-    color: var(--primary-color, #3b82f6);
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .select-button:hover:not(:disabled) {
-    background: var(--primary-color, #3b82f6);
-    color: white;
-  }
-
-  .select-button.selected {
-    background: var(--primary-color, #3b82f6);
-    color: white;
-  }
-
-  .select-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .option-features li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: var(--success-color, #10b981);
+    font-weight: 600;
   }
 
   .quantity-controls {
+    margin-top: 0.75rem;
+    margin-left: 2rem;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
   }
 
-  .qty-button {
-    width: 2rem;
-    height: 2rem;
+  .quantity-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #6b7280);
+  }
+
+  .quantity-input {
+    display: flex;
+    align-items: center;
     border: 1px solid var(--border-color, #e5e7eb);
-    border-radius: 4px;
-    background: white;
-    font-size: 1.125rem;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .qty-btn {
+    background: var(--bg-secondary, #f9fafb);
+    border: none;
+    padding: 0.25rem 0.75rem;
     cursor: pointer;
-    transition: all 0.2s;
+    font-size: 1.125rem;
+    color: var(--text-primary, #111827);
+    transition: background 0.2s;
   }
 
-  .qty-button:hover:not(:disabled) {
-    background: var(--bg-hover, #f9fafb);
-    border-color: var(--primary-color, #3b82f6);
+  .qty-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary, #e5e7eb);
   }
 
-  .qty-button:disabled {
+  .qty-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .quantity-controls input {
+  .qty-value {
+    border: none;
+    background: var(--bg-primary, #ffffff);
+    text-align: center;
     width: 3rem;
-    text-align: center;
-    border: 1px solid var(--border-color, #e5e7eb);
-    border-radius: 4px;
-    padding: 0.375rem;
+    padding: 0.25rem;
     font-size: 0.875rem;
+    color: var(--text-primary, #111827);
   }
 
-  .quantity-controls input:focus {
+  .qty-value:focus {
     outline: none;
-    border-color: var(--primary-color, #3b82f6);
   }
 
-  .unavailable-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
+  .unavailable-message,
+  .disabled-message {
+    margin-top: 0.75rem;
+    margin-left: 2rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--warning-bg, #fef3c7);
+    color: var(--warning-text, #92400e);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
   }
 
-  .unavailable-overlay span {
-    font-size: 0.875rem;
-    color: var(--text-secondary, #6b7280);
-    text-align: center;
-    padding: 1rem;
+  @media (max-width: 640px) {
+    .option-card {
+      padding: 0.875rem;
+    }
+
+    .option-description,
+    .option-features,
+    .quantity-controls,
+    .unavailable-message,
+    .disabled-message {
+      margin-left: 0;
+    }
   }
 </style>

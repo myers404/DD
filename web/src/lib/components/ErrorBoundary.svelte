@@ -1,115 +1,139 @@
 <!-- web/src/lib/components/ErrorBoundary.svelte -->
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+
+  let {
+    children,
+    fallback = null,
+    onError = null
+  } = $props();
 
   let error = $state(null);
-  let errorInfo = $state(null);
+  let hasError = $state(false);
+
+  function handleError(event) {
+    console.error('ErrorBoundary caught:', event.error);
+    error = event.error;
+    hasError = true;
+
+    if (onError) {
+      onError(event.error);
+    }
+
+    // Prevent the error from propagating
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function reset() {
+    error = null;
+    hasError = false;
+  }
 
   onMount(() => {
-    const handleError = (event) => {
-      error = event.error || new Error('Unknown error');
-      errorInfo = {
-        componentStack: event.filename || 'Unknown',
-        lineNumber: event.lineno,
-        columnNumber: event.colno
-      };
-      console.error('Error caught by boundary:', error);
-      event.preventDefault();
-    };
-
+    // Listen for unhandled errors
     window.addEventListener('error', handleError);
     window.addEventListener('unhandledrejection', (event) => {
-      error = new Error(event.reason);
-      errorInfo = { componentStack: 'Promise rejection' };
-      event.preventDefault();
+      handleError({ error: event.reason });
     });
 
     return () => {
       window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleError);
     };
   });
-
-  function reset() {
-    error = null;
-    errorInfo = null;
-  }
-
-  function reload() {
-    location.reload();
-  }
 </script>
 
-{#if error}
-  <div class="error-boundary">
-    <div class="error-content">
-      <h2>Something went wrong</h2>
-      <p class="error-message">{error.message}</p>
+{#if hasError}
+  {#if fallback}
+    {@render fallback(error, reset)}
+  {:else}
+    <div class="error-boundary">
+      <div class="error-content">
+        <div class="error-icon">⚠️</div>
+        <h2 class="error-title">Something went wrong</h2>
+        <p class="error-message">{error?.message || 'An unexpected error occurred'}</p>
 
-      {#if import.meta.env.DEV && errorInfo}
-        <details class="error-details">
-          <summary>Error details</summary>
-          <pre>{JSON.stringify(errorInfo, null, 2)}</pre>
-          <pre>{error.stack}</pre>
-        </details>
-      {/if}
+        {#if import.meta.env.DEV && error?.stack}
+          <details class="error-details">
+            <summary>Error Details</summary>
+            <pre class="error-stack">{error.stack}</pre>
+          </details>
+        {/if}
 
-      <div class="error-actions">
-        <button onclick={reset} class="btn btn-secondary">
-          Try Again
-        </button>
-        <button onclick={reload} class="btn btn-primary">
-          Reload Page
-        </button>
+        <div class="error-actions">
+          <button class="btn btn-primary" onclick={reset}>
+            Try Again
+          </button>
+          <button class="btn btn-secondary" onclick={() => location.reload()}>
+            Reload Page
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  {/if}
 {:else}
-  <slot />
+  {@render children()}
 {/if}
 
 <style>
   .error-boundary {
+    min-height: 400px;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 400px;
     padding: 2rem;
   }
 
   .error-content {
-    text-align: center;
     max-width: 500px;
+    text-align: center;
   }
 
-  .error-content h2 {
-    color: var(--error-color, #dc2626);
+  .error-icon {
+    font-size: 3rem;
     margin-bottom: 1rem;
   }
 
+  .error-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary, #111827);
+  }
+
   .error-message {
+    margin: 0 0 1.5rem;
+    font-size: 1rem;
     color: var(--text-secondary, #6b7280);
-    margin-bottom: 2rem;
   }
 
   .error-details {
+    margin: 1rem 0;
     text-align: left;
     background: var(--bg-secondary, #f9fafb);
-    padding: 1rem;
+    border: 1px solid var(--border-color, #e5e7eb);
     border-radius: 6px;
-    margin-bottom: 2rem;
+    padding: 1rem;
   }
 
   .error-details summary {
     cursor: pointer;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.875rem;
   }
 
-  .error-details pre {
-    margin: 0;
+  .error-stack {
+    margin: 1rem 0 0;
+    padding: 1rem;
+    background: var(--bg-tertiary, #111827);
+    color: var(--text-code, #f3f4f6);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
-    font-size: 0.75rem;
   }
 
   .error-actions {
@@ -119,13 +143,13 @@
   }
 
   .btn {
-    padding: 0.625rem 1.25rem;
+    padding: 0.75rem 1.5rem;
     border-radius: 6px;
-    font-weight: 500;
-    font-size: 0.875rem;
     border: none;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
+    font-size: 1rem;
   }
 
   .btn-primary {
@@ -138,11 +162,11 @@
   }
 
   .btn-secondary {
-    background: var(--secondary-color, #e5e7eb);
-    color: var(--text-primary, #1a1a1a);
+    background: var(--bg-secondary, #f3f4f6);
+    color: var(--text-primary, #111827);
   }
 
   .btn-secondary:hover {
-    background: var(--secondary-hover, #d1d5db);
+    background: var(--bg-tertiary, #e5e7eb);
   }
 </style>

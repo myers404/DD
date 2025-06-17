@@ -1,24 +1,35 @@
 // web/src/lib/stores/configuration.svelte.js
 import ConfiguratorApiClient from '../api/client.js';
+import { sanitizeObject, debugCheckForCode } from '../utils/sanitizer.js';
 
 class ConfigurationStore {
   constructor() {
     // Core state
     this.modelId = $state('');
     this.model = $state(null);
+    this.configuration = $state(null);
     this.selections = $state({});
-    this.validationResults = $state([]);
+    this.validationResults = $state(null);
     this.pricingData = $state(null);
     this.availableOptions = $state([]);
+    this.constraints = $state([]);
+
+    // Model data - ensure arrays are initialized
+    this.groups = $state([]);
+    this.options = $state([]);
+    this.rules = $state([]);
+    this.pricingRules = $state([]);
+    this.volumeTiers = $state([]);
 
     // Loading states
     this.isLoading = $state(false);
     this.isValidating = $state(false);
     this.isPricing = $state(false);
+    this.isSaving = $state(false);
 
     // Error handling
     this.error = $state(null);
-    this.retryCount = $state(0);
+    this.validationErrors = $state([]);
 
     // Configuration management
     this.configurationId = $state(null);
@@ -27,29 +38,36 @@ class ConfigurationStore {
 
     // UI state
     this.currentStep = $state(0);
+    this.expandedGroups = $state(new Set());
 
     // API client
     this.api = null;
 
-    // Internal state
+    // Internal
     this._initialized = false;
     this._debounceTimers = new Map();
-    this._loadingPromise = null;
+    this._modelLoaded = false;
   }
 
-  // Initialize store and effects
-  initialize() {
+  // Initialize store
+  async initialize() {
     if (this._initialized) return;
     this._initialized = true;
 
-    console.log('🔧 ConfigurationStore initialized');
+    console.log('🚀 ConfigurationStore initialized');
 
-    // Test API connection
-    this._testConnection();
+    // Ensure arrays are initialized
+    if (!Array.isArray(this.groups)) this.groups = [];
+    if (!Array.isArray(this.options)) this.options = [];
+    if (!Array.isArray(this.rules)) this.rules = [];
+    if (!Array.isArray(this.pricingRules)) this.pricingRules = [];
+    if (!Array.isArray(this.volumeTiers)) this.volumeTiers = [];
+    if (!Array.isArray(this.availableOptions)) this.availableOptions = [];
+    if (!Array.isArray(this.validationErrors)) this.validationErrors = [];
 
-    // Initialize API client when modelId changes
+    // Setup effects for reactive updates
     $effect(() => {
-      if (this.modelId && !this._loadingPromise) {
+      if (this.modelId && !this.api) {
         this.api = new ConfiguratorApiClient(window.__API_BASE_URL__, {
           modelId: this.modelId
         });
@@ -57,31 +75,35 @@ class ConfigurationStore {
       }
     });
 
-    // Auto-validate selections
+    // Auto-validate on selection changes
     $effect(() => {
-      if (this.api && Object.keys(this.selections).length > 0 && this.model) {
-        this._debounce('validate', () => this.validateSelections(), 300);
+      if (this.api && Object.keys(this.selections).length > 0) {
+        this._debounce('validate', () => this.validateSelections(), 500);
       }
     });
 
-    // Auto-calculate pricing
+    // Auto-calculate pricing after validation
     $effect(() => {
-      if (this.api && this.isValid && Object.keys(this.selections).length > 0 && this.model) {
-        this._debounce('pricing', () => this.calculatePricing(), 500);
+      if (this.api && this.isValid && Object.keys(this.selections).length > 0) {
+        this._debounce('pricing', () => this.calculatePricing(), 300);
       }
     });
 
-    // Auto-save
+    // Track dirty state
     $effect(() => {
-      if (this.isDirty && this.configurationId) {
-        this._debounce('save', () => this.saveConfiguration(), 30000);
+      if (this.configuration && Object.keys(this.selections).length > 0) {
+        this.isDirty = true;
       }
     });
   }
 
-  // Derived state
+  // Computed values
   get isValid() {
-    return this.validationResults.length === 0;
+    return !this.validationResults || this.validationResults.is_valid;
+  }
+
+  get hasViolations() {
+    return this.validationResults?.violations?.length > 0;
   }
 
   get totalPrice() {
@@ -92,546 +114,550 @@ class ConfigurationStore {
     return this.pricingData?.base_price || 0;
   }
 
-  get adjustments() {
-    return this.pricingData?.adjustments || [];
+  get discounts() {
+    return this.pricingData?.discounts || [];
   }
 
-  get selectedOptions() {
-    if (!this.model?.option_groups || !Array.isArray(this.model.option_groups)) return [];
-
-    const selected = [];
-    for (const group of this.model.option_groups) {
-      if (!group.options || !Array.isArray(group.options)) continue;
-
-      for (const option of group.options) {
-        if (this.selections[option.id] > 0) {
-          selected.push({
-            ...option,
-            quantity: this.selections[option.id],
-            group_name: group.name,
-            group_id: group.id
-          });
-        }
-      }
-    }
-    return selected;
+  get selectedCount() {
+    return Object.values(this.selections).reduce((sum, qty) => sum + qty, 0);
   }
 
-  get completionPercentage() {
-    if (!this.model?.option_groups || !Array.isArray(this.model.option_groups)) return 0;
-
-    const requiredGroups = this.model.option_groups.filter(g => g.required);
-    if (requiredGroups.length === 0) return 100;
-
-    const completedGroups = requiredGroups.filter(group =>
-        group.options && Array.isArray(group.options) &&
-        group.options.some(option => this.selections[option.id] > 0)
-    );
-
-    return Math.round((completedGroups.length / requiredGroups.length) * 100);
+  // Safe getters for arrays
+  get safeGroups() {
+    return Array.isArray(this.groups) ? this.groups : [];
   }
 
-  get canProceedToNextStep() {
-    return this.completionPercentage >= 100 && this.isValid;
+  get safeOptions() {
+    return Array.isArray(this.options) ? this.options : [];
   }
 
-  // Core methods
-  setModelId(modelId) {
-    console.log('setModelId called with:', modelId);
-    if (this.modelId !== modelId) {
-      this.modelId = modelId;
-      this.reset();
-    }
+  get safeRules() {
+    return Array.isArray(this.rules) ? this.rules : [];
   }
 
+  get safePricingRules() {
+    return Array.isArray(this.pricingRules) ? this.pricingRules : [];
+  }
+
+  get safeVolumeTiers() {
+    return Array.isArray(this.volumeTiers) ? this.volumeTiers : [];
+  }
+
+  get progress() {
+    if (!this.model || !this._modelLoaded) return 0;
+    const groups = this.safeGroups;
+    if (groups.length === 0) return 0;
+
+    const requiredGroups = groups.filter(g => g && g.required).length;
+    if (requiredGroups === 0) return 100; // No required groups means complete
+
+    const selectedGroups = groups.filter(g => g && g.id && this.hasGroupSelection(g.id)).length;
+    return Math.round((selectedGroups / requiredGroups) * 100);
+  }
+
+  // Model Management
   async loadModel() {
-    if (!this.api || this._loadingPromise) return;
-
-    // This method tries multiple approaches to load model data since
-    // different backends may structure their responses differently.
-    // It will try to find groups and options in various locations
-    // and log detailed information to help debug API integration issues.
-
-    this._loadingPromise = this._executeWithRetry(async () => {
-      this.isLoading = true;
-      this.error = null;
-
-      try {
-        // First, try to get the model
-        let model;
-        try {
-          model = await this.api.getModel();
-          console.log('Raw model response:', model);
-        } catch (error) {
-          // If model not found, provide helpful error message
-          if (error.message.includes('404')) {
-            throw new Error(
-                `Model "${this.modelId}" not found. ` +
-                `Use the debug test page to list available models, ` +
-                `or check /api/v1/models endpoint.`
-            );
-          }
-          throw error;
-        }
-
-        if (!model || typeof model !== 'object') {
-          throw new Error('Invalid model data received');
-        }
-
-        // Initialize the model structure
-        this.model = {
-          id: model.id || model.ID || model.model_id,
-          name: model.name || model.Name || 'Configuration',
-          description: model.description || model.Description,
-          option_groups: []
-        };
-
-        // Check different possible structures for groups/options
-        if (model.option_groups && Array.isArray(model.option_groups)) {
-          // Model already has option_groups with options
-          this.model.option_groups = model.option_groups;
-          console.log('Using option_groups from model');
-        } else if (model.groups && Array.isArray(model.groups)) {
-          // Model has groups (different property name)
-          this.model.option_groups = model.groups;
-          console.log('Using groups from model');
-        } else if (model.data?.groups && Array.isArray(model.data.groups)) {
-          // Groups might be nested in data
-          this.model.option_groups = model.data.groups;
-          console.log('Using groups from model.data');
-        } else {
-          // Need to fetch groups separately
-          console.log('Fetching groups separately...');
-          try {
-            const groupsData = await this.api.getModelGroups();
-            console.log('Groups API response:', groupsData);
-
-            if (Array.isArray(groupsData)) {
-              this.model.option_groups = groupsData;
-            } else if (groupsData.groups) {
-              this.model.option_groups = groupsData.groups;
-            } else if (groupsData.option_groups) {
-              this.model.option_groups = groupsData.option_groups;
-            } else if (groupsData.data && Array.isArray(groupsData.data)) {
-              this.model.option_groups = groupsData.data;
-            } else if (groupsData.data?.groups) {
-              this.model.option_groups = groupsData.data.groups;
-            }
-          } catch (e) {
-            console.error('Failed to load groups:', e);
-          }
-        }
-
-        // If still no groups, check if model has flat options array
-        if ((!this.model.option_groups || this.model.option_groups.length === 0) &&
-            (model.options || model.Options)) {
-          console.log('No groups found, but model has flat options array');
-          const flatOptions = model.options || model.Options;
-
-          // Group options by their group_id
-          const groupMap = new Map();
-          flatOptions.forEach(opt => {
-            const groupId = opt.group_id || opt.groupId || opt.group || 'default';
-            if (!groupMap.has(groupId)) {
-              groupMap.set(groupId, {
-                id: groupId,
-                name: opt.group_name || opt.groupName || groupId,
-                options: []
-              });
-            }
-            groupMap.get(groupId).options.push(opt);
-          });
-
-          this.model.option_groups = Array.from(groupMap.values());
-          console.log('Created groups from flat options:', this.model.option_groups);
-        }
-
-        // Log what we have so far
-        console.log('Groups loaded:', this.model.option_groups?.length || 0, 'groups');
-        if (this.model.option_groups?.length > 0) {
-          console.log('First group structure:', this.model.option_groups[0]);
-          console.log('Group properties:', Object.keys(this.model.option_groups[0]));
-        }
-
-        // Check if any group has options
-        const hasAnyOptions = this.model.option_groups.some(g =>
-            (g.options && Array.isArray(g.options) && g.options.length > 0) ||
-            (g.Options && Array.isArray(g.Options) && g.Options.length > 0) ||
-            (g.items && Array.isArray(g.items) && g.items.length > 0) ||
-            (g.choices && Array.isArray(g.choices) && g.choices.length > 0)
-        );
-
-        if (!hasAnyOptions && this.model.option_groups.length > 0) {
-          console.log('No options found in groups, fetching options separately...');
-
-          // Try to get options separately
-          try {
-            const optionsData = await this.api.getModelOptions();
-            console.log('Options API response:', optionsData);
-
-            let allOptions = [];
-            if (Array.isArray(optionsData)) {
-              allOptions = optionsData;
-            } else if (optionsData.options) {
-              allOptions = optionsData.options;
-            } else if (optionsData.data && Array.isArray(optionsData.data)) {
-              allOptions = optionsData.data;
-            } else if (optionsData.data?.options) {
-              allOptions = optionsData.data.options;
-            }
-
-            console.log('Total options found:', allOptions.length);
-
-            // Log structure of first option to help debug
-            if (allOptions.length > 0) {
-              console.log('First option structure:', allOptions[0]);
-              console.log('Option properties:', Object.keys(allOptions[0]));
-            }
-
-            // Assign options to their groups
-            if (allOptions.length > 0) {
-              this.model.option_groups = this.model.option_groups.map(group => {
-                const groupOptions = allOptions.filter(opt => {
-                  // Try different ways to match options to groups
-                  return opt.group_id === group.id ||
-                      opt.groupId === group.id ||
-                      opt.group === group.id ||
-                      opt.group_name === group.name ||
-                      opt.groupName === group.name ||
-                      opt.group_id === group.name ||
-                      // Also check if group has a different ID property
-                      (group.group_id && (opt.group_id === group.group_id ||
-                          opt.group === group.group_id));
-                });
-
-                console.log(`Group "${group.name}" matched ${groupOptions.length} options`);
-
-                // If no options matched and this is the only group, show all options
-                if (groupOptions.length === 0 && this.model.option_groups.length === 1) {
-                  console.warn('No options matched group criteria, showing all options in single group');
-                  return {
-                    ...group,
-                    options: allOptions
-                  };
-                }
-
-                return {
-                  ...group,
-                  options: groupOptions
-                };
-              });
-            }
-          } catch (e) {
-            console.error('Failed to load options:', e);
-          }
-        }
-
-        // Ensure all groups have options array and normalize structure
-        this.model.option_groups = this.model.option_groups.map(group => {
-          let options = [];
-
-          // Check various possible locations for options
-          if (Array.isArray(group.options)) {
-            options = group.options;
-          } else if (Array.isArray(group.Options)) {
-            options = group.Options;
-          } else if (Array.isArray(group.items)) {
-            options = group.items;
-          } else if (Array.isArray(group.choices)) {
-            options = group.choices;
-          } else if (group.data?.options && Array.isArray(group.data.options)) {
-            options = group.data.options;
-          }
-
-          return {
-            ...group,
-            options: options
-          };
-        });
-
-        // If no options were found at all, create demo options for testing
-        const totalOptions = this.model.option_groups.reduce((sum, g) =>
-            sum + (g.options?.length || 0), 0
-        );
-
-        if (totalOptions === 0 && this.model.option_groups.length > 0) {
-          console.warn('No options found in any group. Creating demo options for testing...');
-          this.usingDemoData = true;
-
-          // Create demo options for each group
-          this.model.option_groups = this.model.option_groups.map((group, groupIndex) => ({
-            ...group,
-            options: this._createDemoOptions(group, groupIndex)
-          }));
-        } else {
-          this.usingDemoData = false;
-        }
-
-        // Final logging
-        console.log('=== Final Model Structure ===');
-        console.log('Model:', this.model);
-        console.log('Groups summary:', this.model.option_groups.map(g => ({
-          id: g.id,
-          name: g.name,
-          optionsCount: g.options?.length || 0,
-          options: g.options?.slice(0, 2) // Show first 2 options
-        })));
-
-        // Initialize selections for preselected options
-        this._initializeSelections();
-
-      } finally {
-        this.isLoading = false;
-        this._loadingPromise = null;
-      }
-    });
-
-    return this._loadingPromise;
-  }
-
-  updateSelection(optionId, quantity) {
-    quantity = Math.max(0, quantity);
-
-    // Check group constraints
-    const group = this._getGroupForOption(optionId);
-    if (group) {
-      if (group.selection_type === 'single' && quantity > 0 && group.options && Array.isArray(group.options)) {
-        // Clear other selections in single-select groups
-        for (const option of group.options) {
-          if (option.id !== optionId) {
-            this.selections[option.id] = 0;
-          }
-        }
-      }
-
-      // Enforce max selections
-      if (group.max_selections && quantity > group.max_selections) {
-        quantity = group.max_selections;
-      }
-    }
-
-    // Update selection
-    if (quantity === 0) {
-      delete this.selections[optionId];
-    } else {
-      this.selections[optionId] = quantity;
-    }
-
-    this.isDirty = true;
-  }
-
-  async validateSelections() {
-    if (!this.api || this.isValidating) return;
-
-    // Skip validation if no selections
-    if (Object.keys(this.selections).length === 0) {
-      this.validationResults = [];
-      return;
-    }
-
-    await this._executeWithRetry(async () => {
-      this.isValidating = true;
-      try {
-        const response = await this.api.validateSelections(this.selections);
-        this.validationResults = response.validation_errors || [];
-        this.availableOptions = response.available_options || [];
-      } finally {
-        this.isValidating = false;
-      }
-    });
-  }
-
-  async calculatePricing(context = {}) {
-    if (!this.api || this.isPricing || !this.isValid) return;
-
-    await this._executeWithRetry(async () => {
-      this.isPricing = true;
-      try {
-        const response = await this.api.calculatePricing(this.selections, context);
-        this.pricingData = response;
-      } finally {
-        this.isPricing = false;
-      }
-    });
-  }
-
-  async createConfiguration() {
     if (!this.api) return;
 
-    const response = await this.api.createConfiguration(this.selections);
-    this.configurationId = response.id;
-    this.isDirty = false;
-    this.lastSaved = new Date();
-    return response;
-  }
-
-  async saveConfiguration() {
-    if (!this.api || !this.configurationId || !this.isDirty) return;
+    this.isLoading = true;
+    this.error = null;
 
     try {
-      await this.api.updateConfiguration(this.configurationId, this.selections);
-      this.isDirty = false;
-      this.lastSaved = new Date();
+      // Load model with all related data
+      const [model, groupsResponse, optionsResponse, rulesResponse, pricingRulesResponse] = await Promise.all([
+        this.api.getModel(),
+        this.api.getModelGroups(),
+        this.api.getModelOptions(),
+        this.api.getModelRules().catch(() => ({ data: [] })),
+        this.api.getModelPricingRules().catch(() => ({ data: [] }))
+      ]);
+
+      // Ensure we have the model data
+      this.model = model;
+
+      // Extract arrays from responses, handling different response formats
+      this.groups = Array.isArray(groupsResponse) ? groupsResponse :
+          (groupsResponse && typeof groupsResponse === 'object' && groupsResponse.data) ? groupsResponse.data :
+              (groupsResponse && typeof groupsResponse === 'object' && groupsResponse.groups) ? groupsResponse.groups :
+                  (model && model.option_groups && Array.isArray(model.option_groups)) ? model.option_groups :
+                      (model && model.groups && Array.isArray(model.groups)) ? model.groups :
+                          [];
+
+      this.options = Array.isArray(optionsResponse) ? optionsResponse :
+          (optionsResponse && typeof optionsResponse === 'object' && optionsResponse.data) ? optionsResponse.data :
+              (optionsResponse && typeof optionsResponse === 'object' && optionsResponse.options) ? optionsResponse.options :
+                  (model && model.options && Array.isArray(model.options)) ? model.options :
+                      [];
+
+      this.rules = Array.isArray(rulesResponse) ? rulesResponse :
+          (rulesResponse && typeof rulesResponse === 'object' && rulesResponse.data) ? rulesResponse.data :
+              (rulesResponse && typeof rulesResponse === 'object' && rulesResponse.rules) ? rulesResponse.rules :
+                  [];
+
+      this.pricingRules = Array.isArray(pricingRulesResponse) ? pricingRulesResponse :
+          (pricingRulesResponse && typeof pricingRulesResponse === 'object' && pricingRulesResponse.data) ? pricingRulesResponse.data :
+              (pricingRulesResponse && typeof pricingRulesResponse === 'object' && pricingRulesResponse.pricing_rules) ? pricingRulesResponse.pricing_rules :
+                  [];
+
+      // Clean up any function strings in descriptions
+      this.groups = this.groups.map(group => ({
+        ...group,
+        description: (typeof group.description === 'string' &&
+            (group.description.includes('=>') ||
+                group.description.includes('function') ||
+                group.description.includes('$props')))
+            ? '' : group.description
+      }));
+
+      this.options = this.options.map(option => ({
+        ...option,
+        description: (typeof option.description === 'string' &&
+            (option.description.includes('=>') ||
+                option.description.includes('function') ||
+                option.description.includes('$props')))
+            ? '' : option.description
+      }));
+
+      // Final safety check - ensure everything is an array
+      if (!Array.isArray(this.groups)) this.groups = [];
+      if (!Array.isArray(this.options)) this.options = [];
+      if (!Array.isArray(this.rules)) this.rules = [];
+      if (!Array.isArray(this.pricingRules)) this.pricingRules = [];
+
+      // If groups/options are empty, try to get them from the model itself
+      if (this.groups.length === 0 && model.option_groups) {
+        console.log('Using groups from model.option_groups');
+        this.groups = Array.isArray(model.option_groups) ? model.option_groups : [];
+      }
+      if (this.groups.length === 0 && model.groups) {
+        console.log('Using groups from model.groups');
+        this.groups = Array.isArray(model.groups) ? model.groups : [];
+      }
+
+      if (this.options.length === 0 && model.options) {
+        console.log('Using options from model.options');
+        this.options = Array.isArray(model.options) ? model.options : [];
+      }
+
+      // If we still don't have options but have groups, try to extract from groups
+      if (this.options.length === 0 && this.groups.length > 0) {
+        const extractedOptions = [];
+        this.groups.forEach(group => {
+          if (Array.isArray(group.options)) {
+            group.options.forEach(opt => {
+              extractedOptions.push({
+                ...opt,
+                group_id: group.id
+              });
+            });
+          }
+        });
+        if (extractedOptions.length > 0) {
+          console.log('Extracted options from groups:', extractedOptions.length);
+          this.options = extractedOptions;
+        }
+      }
+
+      // Log what we got for debugging
+      console.log('Model loaded:', {
+        model: model,
+        groups: this.groups,
+        options: this.options,
+        groupsCount: this.groups.length,
+        optionsCount: this.options.length
+      });
+
+      // Debug: Check for any function strings in the data
+      this.groups.forEach((group, index) => {
+        if (group.description && typeof group.description === 'string' &&
+            (group.description.includes('=>') || group.description.includes('function'))) {
+          console.warn(`Group ${index} (${group.name}) has function code in description:`, group.description);
+        }
+        if (group.name && typeof group.name === 'string' &&
+            (group.name.includes('=>') || group.name.includes('function'))) {
+          console.warn(`Group ${index} has function code in name:`, group.name);
+        }
+      });
+
+      this.options.forEach((option, index) => {
+        if (option.description && typeof option.description === 'string' &&
+            (option.description.includes('=>') || option.description.includes('function'))) {
+          console.warn(`Option ${index} (${option.name}) has function code in description:`, option.description);
+        }
+        if (option.name && typeof option.name === 'string' &&
+            (option.name.includes('=>') || option.name.includes('function'))) {
+          console.warn(`Option ${index} has function code in name:`, option.name);
+        }
+      });
+
+      // Load volume tiers
+      try {
+        const tiersResponse = await this.api.getVolumeTiers();
+        this.volumeTiers = Array.isArray(tiersResponse) ? tiersResponse :
+            (tiersResponse && typeof tiersResponse === 'object' && tiersResponse.data) ? tiersResponse.data :
+                (tiersResponse && typeof tiersResponse === 'object' && tiersResponse.tiers) ? tiersResponse.tiers :
+                    [];
+      } catch (e) {
+        console.warn('Volume tiers not available');
+        this.volumeTiers = [];
+      }
+
+      // Final check for volume tiers
+      if (!Array.isArray(this.volumeTiers)) this.volumeTiers = [];
+
+      // Create initial configuration
+      if (this.groups.length > 0 || this.options.length > 0) {
+        this._modelLoaded = true;
+        await this.createConfiguration();
+      } else {
+        console.warn('No groups or options loaded - skipping configuration creation');
+      }
+
     } catch (error) {
-      console.error('Failed to save configuration:', error);
+      this.error = error.message;
+      console.error('Failed to load model:', error);
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  // Configuration Management
+  async createConfiguration() {
+    if (!this.api || this.configuration) return;
+
+    try {
+      const config = await this.api.createConfiguration([]);
+      this.configuration = config;
+      this.configurationId = config.id;
+      console.log('Configuration created:', config.id);
+    } catch (error) {
+      this.error = error.message;
+      console.error('Failed to create configuration:', error);
     }
   }
 
   async loadConfiguration(configId) {
     if (!this.api) return;
 
-    await this._executeWithRetry(async () => {
-      this.isLoading = true;
-      try {
-        const config = await this.api.getConfiguration(configId);
-        this.configurationId = config.id;
-        this.selections = this._parseSelections(config.selections);
-        this.isDirty = false;
-
-        await Promise.all([
-          this.validateSelections(),
-          this.calculatePricing()
-        ]);
-      } finally {
-        this.isLoading = false;
-      }
-    });
-  }
-
-  async loadAvailableOptions() {
-    if (!this.api || !this.configurationId) return;
+    this.isLoading = true;
 
     try {
-      const response = await this.api.getAvailableOptions(this.configurationId);
-      this.availableOptions = response.available_options || [];
+      const config = await this.api.getConfiguration(configId);
+      this.configuration = config;
+      this.configurationId = config.id;
+
+      // Convert selections to object format
+      const selectionsObj = {};
+      config.selections?.forEach(sel => {
+        selectionsObj[sel.option_id] = sel.quantity;
+      });
+      this.selections = selectionsObj;
+
+      // Validate and price
+      await Promise.all([
+        this.validateConfiguration(),
+        this.calculatePricing()
+      ]);
+
     } catch (error) {
-      console.error('Failed to load available options:', error);
+      this.error = error.message;
+    } finally {
+      this.isLoading = false;
     }
   }
 
+  async saveConfiguration() {
+    if (!this.api || !this.configurationId || !this.isDirty) return;
+
+    this.isSaving = true;
+
+    try {
+      await this.api.updateConfiguration(this.configurationId, {
+        selections: this.selections,
+        name: `Configuration ${new Date().toLocaleDateString()}`
+      });
+
+      this.lastSaved = new Date();
+      this.isDirty = false;
+
+    } catch (error) {
+      console.error('Failed to save configuration:', error);
+    } finally {
+      this.isSaving = false;
+    }
+  }
+
+  // Selection Management
+  async updateSelection(optionId, quantity) {
+    // Ensure we have data loaded
+    const options = this.safeOptions;
+    const groups = this.safeGroups;
+
+    if (options.length === 0) {
+      console.warn('Cannot update selection - options not loaded');
+      return;
+    }
+
+    const newSelections = { ...this.selections };
+
+    if (quantity > 0) {
+      newSelections[optionId] = quantity;
+    } else {
+      delete newSelections[optionId];
+    }
+
+    // Check group constraints
+    const option = options.find(o => o.id === optionId);
+    if (option) {
+      const group = groups.find(g => g.id === option.group_id);
+
+      if (group?.selection_type === 'single') {
+        // Clear other selections in the group
+        options
+            .filter(o => o.group_id === group.id && o.id !== optionId)
+            .forEach(o => delete newSelections[o.id]);
+      }
+
+      if (group?.max_selections) {
+        // Check max selections
+        const groupSelections = options
+            .filter(o => o.group_id === group.id && newSelections[o.id])
+            .length;
+
+        if (groupSelections > group.max_selections) {
+          this.error = `Maximum ${group.max_selections} selections allowed in ${group.name}`;
+          return;
+        }
+      }
+    }
+
+    this.selections = newSelections;
+
+    // Update backend
+    if (this.configurationId) {
+      try {
+        if (quantity > 0) {
+          await this.api.addSelections(this.configurationId, newSelections);
+        } else {
+          await this.api.removeSelection(this.configurationId, optionId);
+        }
+      } catch (error) {
+        this.error = error.message;
+      }
+    }
+  }
+
+  toggleOption(optionId) {
+    const currentQty = this.selections[optionId] || 0;
+    return this.updateSelection(optionId, currentQty > 0 ? 0 : 1);
+  }
+
+  // Validation
+  async validateSelections() {
+    if (!this.api || this.isValidating) return;
+
+    this.isValidating = true;
+    this.validationErrors = [];
+
+    try {
+      const result = await this.api.validateSelections(this.selections);
+      this.validationResults = result;
+
+      if (result.available_options) {
+        this.availableOptions = result.available_options;
+      }
+
+      if (result.violations) {
+        this.validationErrors = result.violations;
+      }
+
+    } catch (error) {
+      console.error('Validation failed:', error);
+    } finally {
+      this.isValidating = false;
+    }
+  }
+
+  async validateConfiguration() {
+    if (!this.api || !this.configurationId) return;
+
+    this.isValidating = true;
+
+    try {
+      const result = await this.api.validateConfiguration(this.configurationId);
+      this.validationResults = result;
+
+      if (result.available_options) {
+        this.availableOptions = result.available_options;
+      }
+
+    } catch (error) {
+      console.error('Configuration validation failed:', error);
+    } finally {
+      this.isValidating = false;
+    }
+  }
+
+  // Pricing
+  async calculatePricing(context = {}) {
+    if (!this.api || this.isPricing) return;
+
+    this.isPricing = true;
+
+    try {
+      const result = await this.api.calculatePrice(this.selections, context);
+      this.pricingData = result;
+    } catch (error) {
+      console.error('Pricing calculation failed:', error);
+    } finally {
+      this.isPricing = false;
+    }
+  }
+
+  // Helper Methods
+  hasGroupSelection(groupId) {
+    const options = this.safeOptions;
+    return options
+        .filter(o => o.group_id === groupId)
+        .some(o => this.selections[o.id] > 0);
+  }
+
+  getGroupSelections(groupId) {
+    const options = this.safeOptions;
+    return options
+        .filter(o => o.group_id === groupId && this.selections[o.id] > 0)
+        .map(o => ({ ...o, quantity: this.selections[o.id] }));
+  }
+
+  isOptionAvailable(optionId) {
+    if (!this.availableOptions.length) return true;
+    return this.availableOptions.includes(optionId);
+  }
+
+  isOptionSelected(optionId) {
+    return this.selections[optionId] > 0;
+  }
+
+  getOptionQuantity(optionId) {
+    return this.selections[optionId] || 0;
+  }
+
+  // Group UI Management
+  toggleGroup(groupId) {
+    const expanded = new Set(this.expandedGroups);
+    if (expanded.has(groupId)) {
+      expanded.delete(groupId);
+    } else {
+      expanded.add(groupId);
+    }
+    this.expandedGroups = expanded;
+  }
+
+  isGroupExpanded(groupId) {
+    return this.expandedGroups.has(groupId);
+  }
+
+  // Export configuration
   exportConfiguration() {
+    const options = this.safeOptions;
+    const selectedOptions = Object.entries(this.selections)
+        .filter(([_, qty]) => qty > 0)
+        .map(([optionId, quantity]) => {
+          const option = options.find(o => o.id === optionId);
+          return {
+            option_id: optionId,
+            option_name: option?.name,
+            quantity,
+            unit_price: option?.price || 0,
+            total_price: (option?.price || 0) * quantity
+          };
+        });
+
     return {
+      id: this.configurationId,
       model_id: this.modelId,
-      selections: this.selections,
-      timestamp: new Date().toISOString(),
-      total_price: this.totalPrice,
-      is_valid: this.isValid
+      model_name: this.model?.name,
+      selections: selectedOptions,
+      validation: {
+        is_valid: this.isValid,
+        violations: this.validationResults?.violations || []
+      },
+      pricing: {
+        base_price: this.basePrice,
+        total_price: this.totalPrice,
+        discounts: this.discounts,
+        breakdown: this.pricingData?.breakdown || []
+      },
+      metadata: {
+        created: this.configuration?.created_at,
+        updated: this.configuration?.updated_at,
+        saved: this.lastSaved
+      }
     };
   }
 
-  importConfiguration(config) {
-    if (config.model_id !== this.modelId) {
-      throw new Error('Configuration is for a different model');
-    }
-    this.selections = config.selections || {};
-    this.isDirty = true;
-  }
-
+  // Reset store
   reset() {
     this.selections = {};
-    this.validationResults = [];
+    this.validationResults = null;
     this.pricingData = null;
-    this.availableOptions = [];
-    this.error = null;
+    this.configuration = null;
     this.configurationId = null;
-    this.isDirty = false;
     this.currentStep = 0;
-    this._clearAllTimers();
+    this.isDirty = false;
+    this.error = null;
+    this.validationErrors = [];
   }
 
-  // Test API connection
-  async _testConnection() {
-    if (!window.__API_BASE_URL__) return;
-
-    try {
-      const response = await fetch(`${window.__API_BASE_URL__}/health`);
-      if (response.ok) {
-        console.log('✅ API connection successful');
-      } else {
-        console.warn('⚠️ API health check returned:', response.status);
-      }
-    } catch (error) {
-      console.error('❌ API connection failed:', error.message);
-    }
-  }
-
-  // Utility methods
+  // Utility method for debouncing
   _debounce(key, fn, delay) {
-    this._clearTimer(key);
-    const timer = setTimeout(fn, delay);
-    this._debounceTimers.set(key, timer);
+    clearTimeout(this._debounceTimers.get(key));
+    this._debounceTimers.set(key, setTimeout(fn, delay));
   }
 
-  _clearTimer(key) {
-    const timer = this._debounceTimers.get(key);
-    if (timer) {
-      clearTimeout(timer);
-      this._debounceTimers.delete(key);
+  // Step navigation
+  canProceedToStep(step) {
+    switch (step) {
+      case 1: // Validate
+        return this.selectedCount > 0;
+      case 2: // Price
+        return this.isValid;
+      case 3: // Summary
+        return this.isValid && this.pricingData;
+      default:
+        return true;
     }
   }
 
-  _clearAllTimers() {
-    for (const timer of this._debounceTimers.values()) {
-      clearTimeout(timer);
-    }
-    this._debounceTimers.clear();
-  }
-
-  _getGroupForOption(optionId) {
-    if (!this.model?.option_groups || !Array.isArray(this.model.option_groups)) return null;
-
-    for (const group of this.model.option_groups) {
-      if (group.options && Array.isArray(group.options) &&
-          group.options.some(opt => opt.id === optionId)) {
-        return group;
-      }
-    }
-    return null;
-  }
-
-  _initializeSelections() {
-    if (!this.model?.option_groups || !Array.isArray(this.model.option_groups)) return;
-
-    for (const group of this.model.option_groups) {
-      if (!group.options || !Array.isArray(group.options)) continue;
-
-      for (const option of group.options) {
-        if (option.preselected && !this.selections[option.id]) {
-          this.selections[option.id] = 1;
-        }
-      }
+  nextStep() {
+    if (this.currentStep < 3 && this.canProceedToStep(this.currentStep + 1)) {
+      this.currentStep++;
     }
   }
 
-  _parseSelections(selections) {
-    const parsed = {};
-    for (const sel of selections) {
-      if (sel.quantity > 0) {
-        parsed[sel.option_id] = sel.quantity;
-      }
+  previousStep() {
+    if (this.currentStep > 0) {
+      this.currentStep--;
     }
-    return parsed;
   }
 
-  async _executeWithRetry(fn, maxRetries = 3) {
-    for (let i = 0; i <= maxRetries; i++) {
-      try {
-        return await fn();
-      } catch (error) {
-        this.error = error.message;
-        this.retryCount = i;
+  goToStep(step) {
+    if (step >= 0 && step <= 3 && this.canProceedToStep(step)) {
+      this.currentStep = step;
+    }
+  }
 
-        if (i === maxRetries || error.message.includes('401') || error.message.includes('404')) {
-          console.error('API call failed after retries:', error.message);
-          throw error;
-        }
-
-        // Exponential backoff
-        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
-      }
+  // Model setter
+  setModelId(modelId) {
+    if (this.modelId !== modelId) {
+      this.reset();
+      this.modelId = modelId;
     }
   }
 }
 
-// Export singleton instance
+// Create singleton instance
 export const configStore = new ConfigurationStore();
+
+// Export for component usage with safe getters
+export default configStore;
