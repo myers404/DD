@@ -208,15 +208,33 @@ class ConfiguratorApiClient {
   }
 
   // Pricing Operations
-  async calculatePrice(selections, context = {}) {
-    return this.request('/pricing/calculate', {
-      method: 'POST',
-      body: {
-        model_id: this.modelId,
-        selections: this.formatSelections(selections),
-        context
-      }
-    });
+  // async calculatePrice(selections, context = {}) {
+  //   return this.request('/pricing/calculate', {
+  //     method: 'POST',
+  //     body: {
+  //       model_id: this.modelId,
+  //       selections: this.formatSelections(selections),
+  //       context
+  //     }
+  //   });
+  // }
+
+  async calculatePrice(configurationId, context = {}) {
+    try {
+      const response = await this.request(`/pricing/calculate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          model_id: this.modelId,
+          selections: context.selections || {},
+          context: context.context || {},
+          ...context
+        })
+      });
+      return response.data || response;
+    } catch (error) {
+      console.error('Failed to calculate price:', error);
+      throw error;
+    }
   }
 
   async simulatePricing(scenarios) {

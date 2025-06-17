@@ -298,14 +298,24 @@ func (h *ConfigurationHandlers) CalculatePrice(w http.ResponseWriter, r *http.Re
 	vars := mux.Vars(r)
 	configID := vars["id"]
 
-	modelID := r.URL.Query().Get("model_id")
-	if modelID == "" {
-		WriteBadRequestResponse(w, "Model ID is required")
-		return
+	var req struct {
+		ModelID    string             `json:"model_id"`
+		Selections []SelectionRequest `json:"selections"`
 	}
 
+	if err := ParseJSONRequest(r, &req); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+	//
+	//modelID := r.URL.Query().Get("model_id")
+	//if modelID == "" {
+	//	WriteBadRequestResponse(w, "Model ID is required")
+	//	return
+	//}
+
 	// Calculate pricing
-	pricing, err := h.service.CalculatePrice(modelID, configID)
+	pricing, err := h.service.CalculatePrice(req.ModelID, configID)
 	if err != nil {
 		WriteErrorResponse(w, "PRICING_FAILED", "Failed to calculate price", err.Error(), http.StatusBadRequest)
 		return

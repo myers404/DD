@@ -111,7 +111,7 @@ const GroupsManager = ({ modelId }) => {
   };
 
   // Filter groups based on search and filters
-  const filteredGroups = groups.filter(group => {
+  const filteredGroups = (Array.isArray(groups) ? groups : []).filter(group => {
     const matchesSearch = group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (group.description || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesActive = showInactive || group.active;
@@ -487,8 +487,8 @@ const GroupsManager = ({ modelId }) => {
               Showing {filteredGroups.length} of {groups.length} groups
             </span>
               <div className="flex items-center space-x-4">
-                <span>Active: {groups.filter(g => g.active).length}</span>
-                <span>Inactive: {groups.filter(g => !g.active).length}</span>
+                <span>Active: {(Array.isArray(groups) ? groups : []).filter(g => g.active).length}</span>
+                <span>Inactive: {(Array.isArray(groups) ? groups : []).filter(g => !g.active).length}</span>
               </div>
             </div>
           </div>
