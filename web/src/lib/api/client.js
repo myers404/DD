@@ -141,14 +141,14 @@ class ConfiguratorApiClient {
   }
 
   async updateConfiguration(configId, updates) {
-    return this.request(`/configurations/${configId}`, {
-      method: 'PUT',
-      body: {
-        model_id: this.modelId,
-        ...updates,
-        selections: updates.selections ? this.formatSelections(updates.selections) : undefined
-      }
-    });
+    // return this.request(`/configurations/${configId}`, {
+    //   method: 'PUT',
+    //   body: {
+    //     model_id: this.modelId,
+    //     ...updates,
+    //     selections: updates.selections ? this.formatSelections(updates.selections) : undefined
+    //   }
+    // });
   }
 
   async deleteConfiguration(configId) {

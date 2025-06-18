@@ -19,14 +19,16 @@
             .filter(Boolean);
   })());
 
-  // Calculate totals - using exact API response fields
-  let baseTotal = $derived(pricing?.base_total || 0);
-
-  let totalDiscounts = $derived(
-          pricing?.discounts?.reduce((sum, d) => sum + (d.amount || 0), 0) || 0
+  // Calculate totals
+  let baseTotal = $derived(
+          selectedOptions?.reduce((sum, d) => sum + (d.base_price || 0), 0) || 0
   );
 
-  let finalTotal = $derived(pricing?.final_total || 0);
+  let totalDiscounts = $derived(
+          pricing?.breakdown?.adjustments?.reduce((sum, d) => sum + (d.amount || 0), 0) || 0
+  );
+
+  let finalTotal = $derived(pricing?.breakdown?.total_price || 0);
 </script>
 
 <div class="pricing-display">
@@ -50,7 +52,7 @@
           <div class="line-item">
             <span class="item-name">{option.name}</span>
             <span class="item-price">
-              ${option.price?.toFixed(2) || '0.00'}
+              ${option.base_price?.toFixed(2) || '0.00'}
             </span>
           </div>
         {/each}
@@ -62,14 +64,14 @@
     </div>
 
     <!-- Discounts -->
-    {#if pricing?.discounts && pricing.discounts.length > 0}
+    {#if pricing?.adjustments && pricing.adjustments.length > 0}
       <div class="pricing-section">
         <h4>Discounts</h4>
         <div class="line-items">
-          {#each pricing.discounts as discount}
+          {#each pricing.breakdown.adjustments as adjustment}
             <div class="line-item discount">
-              <span class="item-name">{discount.description}</span>
-              <span class="item-price">-${discount.amount.toFixed(2)}</span>
+              <span class="item-name">{adjustment.description}</span>
+              <span class="item-price">-${adjustment.amount.toFixed(2)}</span>
             </div>
           {/each}
         </div>

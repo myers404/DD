@@ -1,8 +1,8 @@
 // frontend/src/pages/ModelBuilder.jsx
-// Fixed version - production-ready with proper imports and real API integration
+// Complete model builder interface for admins
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -22,21 +22,27 @@ import {
   InformationCircleIcon,
   PlayIcon,
   ClockIcon,
-  UserGroupIcon
+  UserGroupIcon,
+  RectangleStackIcon,
+  ShieldExclamationIcon,
+  LightBulbIcon,
+  ListBulletIcon
 } from '@heroicons/react/24/outline';
 
 // API Functions
 import { cpqApi, modelBuilderApi } from '../services/api';
 
-// Fixed Components - Now using .jsx versions
+// Model Builder Components
+import OptionsManager from '../components/model-builder/OptionsManager';
+import GroupsManager from '../components/model-builder/GroupsManager';
 import RuleEditor from '../components/model-builder/RuleEditor';
+import PricingRulesEditor from '../components/model-builder/PricingRulesEditor';
+import ModelValidation from '../components/model-builder/ModelValidation';
 import ConflictDetection from '../components/model-builder/ConflictDetection';
 import ImpactAnalysis from '../components/model-builder/ImpactAnalysis';
-import ModelValidation from '../components/model-builder/ModelValidation';
 import RulePriorityManager from '../components/model-builder/RulePriorityManager';
-import OptionsManager from '../components/model-builder/OptionsManager';  // Fixed version
-import GroupsManager from '../components/model-builder/GroupsManager';    // Fixed version
-import PricingRulesEditor from '../components/model-builder/PricingRulesEditor';
+
+// Common Components
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import Modal from '../components/common/Modal';
@@ -48,11 +54,10 @@ const ModelBuilder = () => {
 
   // Local state
   const [activeTab, setActiveTab] = useState('overview');
-  const [showRuleEditor, setShowRuleEditor] = useState(false);
-  const [selectedRule, setSelectedRule] = useState(null);
   const [validationResults, setValidationResults] = useState(null);
   const [conflictResults, setConflictResults] = useState(null);
   const [impactResults, setImpactResults] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   // Fetch current model
   const {
@@ -63,16 +68,6 @@ const ModelBuilder = () => {
     queryKey: ['model', modelId],
     queryFn: () => cpqApi.getModel(modelId),
     enabled: !!modelId,
-    refetchOnWindowFocus: false
-  });
-
-  // Fetch all models for navigation
-  const {
-    data: models = [],
-    isLoading: modelsLoading
-  } = useQuery({
-    queryKey: ['models'],
-    queryFn: () => cpqApi.getModels(),
     refetchOnWindowFocus: false
   });
 
@@ -87,555 +82,466 @@ const ModelBuilder = () => {
     refetchOnWindowFocus: false
   });
 
-  // Mutations for various operations
-  const validateModelMutation = useMutation({
-    mutationFn: (id) => modelBuilderApi.getModelQuality(id),
+  // Model mutations
+  const updateModelMutation = useMutation({
+    mutationFn: (data) => cpqApi.updateModel(modelId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['model', modelId]);
+      toast.success('Model updated successfully');
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Failed to update model');
+    }
+  });
+
+  const deleteModelMutation = useMutation({
+    mutationFn: () => cpqApi.deleteModel(modelId),
+    onSuccess: () => {
+      toast.success('Model deleted successfully');
+      navigate('/models');
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Failed to delete model');
+    }
+  });
+
+  const validateMutation = useMutation({
+    mutationFn: () => modelBuilderApi.validateModel(modelId),
     onSuccess: (data) => {
       setValidationResults(data);
-      toast.success('Model validation completed!');
+      toast.success('Model validation complete');
     },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to validate model');
+    onError: (err) => {
+      toast.error(err.message || 'Validation failed');
     }
   });
 
-  const detectConflictsMutation = useMutation({
-    mutationFn: (id) => modelBuilderApi.detectConflicts(id),
-    onSuccess: (data) => {
-      setConflictResults(data);
-      if (data.conflicts?.length > 0) {
-        toast.warning(`Found ${data.conflicts.length} conflicts`);
-      } else {
-        toast.success('No conflicts detected!');
-      }
-    },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to detect conflicts');
-    }
-  });
-
-  const analyzeImpactMutation = useMutation({
-    mutationFn: ({ modelId, changes }) => modelBuilderApi.analyzeImpact(modelId, changes),
-    onSuccess: (data) => {
-      setImpactResults(data);
-      toast.success('Impact analysis completed!');
-    },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to analyze impact');
-    }
-  });
-
-  // Auto-run validation when model changes
-  useEffect(() => {
-    if (modelId && model) {
-      // Auto-validate on load
-      setTimeout(() => {
-        validateModelMutation.mutate(modelId);
-        detectConflictsMutation.mutate(modelId);
-      }, 1000);
-    }
-  }, [modelId, model]);
-
-  // Handle rule operations
-  const handleRuleCreate = useCallback(() => {
-    setSelectedRule(null);
-    setShowRuleEditor(true);
-  }, []);
-
-  const handleRuleEdit = useCallback((rule) => {
-    setSelectedRule(rule);
-    setShowRuleEditor(true);
-  }, []);
-
-  const handleRuleSave = useCallback(async (ruleData) => {
-    try {
-      if (selectedRule) {
-        // Update existing rule
-        await modelBuilderApi.updateRule(modelId, selectedRule.id, ruleData);
-        toast.success('Rule updated successfully!');
-      } else {
-        // Create new rule
-        await modelBuilderApi.addRule(modelId, ruleData);
-        toast.success('Rule created successfully!');
-      }
-
-      // Refresh data
-      queryClient.invalidateQueries(['model', modelId]);
-
-      // Re-run analysis
-      detectConflictsMutation.mutate(modelId);
-      analyzeImpactMutation.mutate({
-        modelId,
-        changes: [{ type: selectedRule ? 'update' : 'create', rule: ruleData }]
-      });
-
-      setShowRuleEditor(false);
-      setSelectedRule(null);
-    } catch (error) {
-      toast.error(error.message || 'Failed to save rule');
-    }
-  }, [modelId, selectedRule, queryClient, detectConflictsMutation, analyzeImpactMutation]);
-
-  const handleRuleDelete = useCallback(async (ruleId) => {
-    if (!window.confirm('Are you sure you want to delete this rule?')) {
-      return;
-    }
-
-    try {
-      await modelBuilderApi.deleteRule(modelId, ruleId);
-
-      // Refresh data
-      queryClient.invalidateQueries(['model', modelId]);
-
-      // Re-run analysis
-      detectConflictsMutation.mutate(modelId);
-      analyzeImpactMutation.mutate({
-        modelId,
-        changes: [{ type: 'delete', ruleId }]
-      });
-
-      toast.success('Rule deleted successfully!');
-    } catch (error) {
-      toast.error(error.message || 'Failed to delete rule');
-    }
-  }, [modelId, queryClient, detectConflictsMutation, analyzeImpactMutation]);
-
-  // Tab Configuration
+  // Tab definitions
   const tabs = [
-    { id: 'overview', name: 'Overview', icon: DocumentTextIcon, description: 'Model summary and statistics' },
-    { id: 'options', name: 'Options', icon: CogIcon, description: 'Manage configuration options' },
-    { id: 'groups', name: 'Groups', icon: UserGroupIcon, description: 'Organize options into groups' },
-    { id: 'rules', name: 'Rules', icon: WrenchScrewdriverIcon, description: 'Define business rules' },
-    { id: 'pricing', name: 'Pricing', icon: CurrencyDollarIcon, description: 'Configure pricing rules' },
-    { id: 'validation', name: 'Validation', icon: CheckCircleIcon, description: 'Model quality analysis' },
-    { id: 'conflicts', name: 'Conflicts', icon: ExclamationTriangleIcon, description: 'Detect rule conflicts' },
-    { id: 'impact', name: 'Impact', icon: BeakerIcon, description: 'Analyze change impacts' },
+    { id: 'overview', name: 'Overview', icon: InformationCircleIcon },
+    { id: 'options', name: 'Options', icon: CogIcon },
+    { id: 'groups', name: 'Groups', icon: UserGroupIcon },
+    { id: 'rules', name: 'Rules', icon: WrenchScrewdriverIcon },
+    { id: 'pricing', name: 'Pricing', icon: CurrencyDollarIcon },
+    { id: 'validation', name: 'Validation', icon: BeakerIcon },
+    { id: 'conflicts', name: 'Conflicts', icon: ShieldExclamationIcon },
+    { id: 'impact', name: 'Impact', icon: ChartBarIcon },
+    { id: 'priorities', name: 'Priorities', icon: ListBulletIcon }
   ];
 
-  // Get current tab info
-  const currentTab = tabs.find(tab => tab.id === activeTab);
+  // Handlers
+  const handleModelUpdate = useCallback(() => {
+    queryClient.invalidateQueries(['model', modelId]);
+    queryClient.invalidateQueries(['model-stats', modelId]);
+  }, [modelId, queryClient]);
 
-  // Loading States
-  if (modelLoading || modelsLoading) {
+  const handleValidateModel = () => {
+    validateMutation.mutate();
+  };
+
+  const handleDetectConflicts = () => {
+    modelBuilderApi.detectConflicts(modelId)
+        .then(data => {
+          setConflictResults(data);
+          toast.success('Conflict detection complete');
+        })
+        .catch(err => {
+          toast.error(err.message || 'Conflict detection failed');
+        });
+  };
+
+  const handleAnalyzeImpact = (changes) => {
+    modelBuilderApi.analyzeImpact(modelId, changes)
+        .then(data => {
+          setImpactResults(data);
+          toast.success('Impact analysis complete');
+        })
+        .catch(err => {
+          toast.error(err.message || 'Impact analysis failed');
+        });
+  };
+
+  const handleTestConfiguration = () => {
+    window.open(`/test/configure/${modelId}`, '_blank');
+  };
+
+  const handleExportModel = () => {
+    // Export functionality
+    toast.info('Export feature coming soon');
+  };
+
+  const handleDeleteModel = () => {
+    deleteModelMutation.mutate();
+  };
+
+  // Tab content rendering with fixed OverviewTab
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'overview':
+        return (
+            <div className="space-y-6">
+              {/* Model Info Card */}
+              <div className="bg-white rounded-lg border p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Model Information</h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Name</label>
+                      <p className="text-gray-900">{model?.name || 'Untitled Model'}</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Category</label>
+                      <p className="text-gray-900">{model?.category || 'Uncategorized'}</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Status</label>
+                      <p className="text-gray-900">
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                          model?.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {model?.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Created</label>
+                      <p className="text-gray-900">
+                        {model?.createdAt ? new Date(model.createdAt).toLocaleDateString() : 'N/A'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Last Modified</label>
+                      <p className="text-gray-900">
+                        {model?.updatedAt ? new Date(model.updatedAt).toLocaleDateString() : 'N/A'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Model ID</label>
+                      <p className="text-xs text-gray-500 font-mono">{modelId}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {model?.description && (
+                    <div className="mt-4 pt-4 border-t">
+                      <label className="text-sm font-medium text-gray-500">Description</label>
+                      <p className="text-gray-700 mt-1">{model.description}</p>
+                    </div>
+                )}
+              </div>
+
+              {/* Statistics */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white rounded-lg border p-4">
+                  <div className="flex items-center">
+                    <CogIcon className="w-8 h-8 text-blue-600" />
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-500">Options</p>
+                      <p className="text-2xl font-semibold text-gray-900">
+                        {statsLoading ? '-' : modelStats?.optionsCount || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg border p-4">
+                  <div className="flex items-center">
+                    <UserGroupIcon className="w-8 h-8 text-green-600" />
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-500">Groups</p>
+                      <p className="text-2xl font-semibold text-gray-900">
+                        {statsLoading ? '-' : modelStats?.groupsCount || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg border p-4">
+                  <div className="flex items-center">
+                    <WrenchScrewdriverIcon className="w-8 h-8 text-purple-600" />
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-500">Rules</p>
+                      <p className="text-2xl font-semibold text-gray-900">
+                        {statsLoading ? '-' : modelStats?.rulesCount || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg border p-4">
+                  <div className="flex items-center">
+                    <CurrencyDollarIcon className="w-8 h-8 text-yellow-600" />
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-500">Pricing Rules</p>
+                      <p className="text-2xl font-semibold text-gray-900">
+                        {statsLoading ? '-' : modelStats?.pricingRulesCount || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="bg-white rounded-lg border p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <button
+                      onClick={handleValidateModel}
+                      disabled={validateMutation.isLoading}
+                      className="flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    <BeakerIcon className="w-5 h-5 mr-2" />
+                    {validateMutation.isLoading ? 'Validating...' : 'Validate Model'}
+                  </button>
+
+                  <button
+                      onClick={handleTestConfiguration}
+                      className="flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    <PlayIcon className="w-5 h-5 mr-2" />
+                    Test Configuration
+                  </button>
+
+                  <button
+                      onClick={handleExportModel}
+                      className="flex items-center justify-center px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    <DocumentTextIcon className="w-5 h-5 mr-2" />
+                    Export Model
+                  </button>
+                </div>
+              </div>
+            </div>
+        );
+
+      case 'options':
+        return (
+            <OptionsManager
+                modelId={modelId}
+                onUpdate={handleModelUpdate}
+            />
+        );
+
+      case 'groups':
+        return (
+            <GroupsManager
+                modelId={modelId}
+                onUpdate={handleModelUpdate}
+            />
+        );
+
+      case 'rules':
+        return (
+            <div className="space-y-6">
+              <RuleEditor
+                  modelId={modelId}
+                  onUpdate={handleModelUpdate}
+              />
+            </div>
+        );
+
+      case 'pricing':
+        return (
+            <PricingRulesEditor
+                modelId={modelId}
+                onUpdate={handleModelUpdate}
+            />
+        );
+
+      case 'validation':
+        return (
+            <ModelValidation
+                modelId={modelId}
+                validationResults={validationResults}
+                onValidate={handleValidateModel}
+            />
+        );
+
+      case 'conflicts':
+        return (
+            <ConflictDetection
+                modelId={modelId}
+                conflictResults={conflictResults}
+                onDetect={handleDetectConflicts}
+            />
+        );
+
+      case 'impact':
+        return (
+            <ImpactAnalysis
+                modelId={modelId}
+                impactResults={impactResults}
+                onAnalyze={handleAnalyzeImpact}
+            />
+        );
+
+      case 'priorities':
+        return (
+            <RulePriorityManager
+                modelId={modelId}
+                onUpdate={handleModelUpdate}
+            />
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  // Loading state
+  if (modelLoading) {
     return (
-        <div className="min-h-screen flex items-center justify-center">
-          <LoadingSpinner size="large" message="Loading model builder..." />
+        <div className="flex items-center justify-center h-64">
+          <LoadingSpinner size="large" message="Loading model..." />
         </div>
     );
   }
 
+  // Error state
   if (modelError) {
     return (
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center p-8 max-w-md">
-            <ExclamationTriangleIcon className="mx-auto h-16 w-16 text-red-500 mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Model Not Found</h2>
-            <p className="text-gray-600 mb-6">
-              {modelError.message || 'The requested model could not be loaded.'}
-            </p>
-            <div className="space-y-3">
-              <button
-                  onClick={() => navigate('/dashboard')}
-                  className="w-full bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Return to Dashboard
-              </button>
-              <button
-                  onClick={() => window.location.reload()}
-                  className="w-full bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors"
-              >
-                Retry
-              </button>
-            </div>
+        <div className="text-center py-12">
+          <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-500" />
+          <h3 className="mt-2 text-lg font-medium text-gray-900">Failed to load model</h3>
+          <p className="mt-1 text-sm text-gray-500">{modelError.message}</p>
+          <div className="mt-4">
+            <Link
+                to="/models"
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              <ArrowLeftIcon className="w-4 h-4 mr-2" />
+              Back to Models
+            </Link>
           </div>
         </div>
     );
   }
-
-  // Overview Tab Content
-  const OverviewTab = () => (
-      <div className="space-y-6">
-        {/* Model Information */}
-        <div className="bg-white rounded-lg border p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <InformationCircleIcon className="w-5 h-5 mr-2 text-blue-600" />
-            Model Information
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div>
-              <label className="text-sm font-medium text-gray-500">Model Name</label>
-              <p className="text-lg font-medium text-gray-900">{model?.name}</p>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-500">Version</label>
-              <p className="text-lg font-medium text-gray-900">{model?.version || '1.0'}</p>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-500">Status</label>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  model?.active
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-gray-100 text-gray-800'
-              }`}>
-              {model?.active ? 'Active' : 'Inactive'}
-            </span>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-500">Created</label>
-              <p className="text-sm text-gray-700">
-                {model?.createdAt ? new Date(model.createdAt).toLocaleDateString() : 'N/A'}
-              </p>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-500">Last Modified</label>
-              <p className="text-sm text-gray-700">
-                {model?.updatedAt ? new Date(model.updatedAt).toLocaleDateString() : 'N/A'}
-              </p>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-500">Model ID</label>
-              <p className="text-xs text-gray-500 font-mono">{modelId}</p>
-            </div>
-          </div>
-
-          {model?.description && (
-              <div className="mt-4 pt-4 border-t">
-                <label className="text-sm font-medium text-gray-500">Description</label>
-                <p className="text-gray-700 mt-1">{model.description}</p>
-              </div>
-          )}
-        </div>
-
-        {/* Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white rounded-lg border p-4">
-            <div className="flex items-center">
-              <CogIcon className="w-8 h-8 text-blue-600" />
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-500">Options</p>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {statsLoading ? '-' : modelStats?.optionsCount || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border p-4">
-            <div className="flex items-center">
-              <UserGroupIcon className="w-8 h-8 text-green-600" />
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-500">Groups</p>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {statsLoading ? '-' : modelStats?.groupsCount || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border p-4">
-            <div className="flex items-center">
-              <WrenchScrewdriverIcon className="w-8 h-8 text-purple-600" />
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-500">Rules</p>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {statsLoading ? '-' : modelStats?.rulesCount || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border p-4">
-            <div className="flex items-center">
-              <ChartBarIcon className="w-8 h-8 text-orange-600" />
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-500">Configurations</p>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {statsLoading ? '-' : modelStats?.configurationsCount || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Health Status */}
-        <div className="bg-white rounded-lg border p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <CheckCircleIcon className="w-5 h-5 mr-2 text-green-600" />
-            Model Health
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <div className={`text-2xl font-bold ${
-                  validationResults?.isValid ? 'text-green-600' : 'text-red-600'
-              }`}>
-                {validationResults?.isValid ? '✓' : '✗'}
-              </div>
-              <p className="text-sm text-gray-600 mt-1">Validation</p>
-            </div>
-
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <div className={`text-2xl font-bold ${
-                  conflictResults?.conflicts?.length === 0 ? 'text-green-600' : 'text-red-600'
-              }`}>
-                {conflictResults?.conflicts?.length || 0}
-              </div>
-              <p className="text-sm text-gray-600 mt-1">Conflicts</p>
-            </div>
-
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">
-                {impactResults?.score?.toFixed(1) || 'N/A'}
-              </div>
-              <p className="text-sm text-gray-600 mt-1">Quality Score</p>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-                onClick={() => validateModelMutation.mutate(modelId)}
-                disabled={validateModelMutation.isLoading}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {validateModelMutation.isLoading ? (
-                  <LoadingSpinner size="sm" className="mr-2" />
-              ) : (
-                  <PlayIcon className="w-4 h-4 mr-2" />
-              )}
-              Run Validation
-            </button>
-
-            <button
-                onClick={() => detectConflictsMutation.mutate(modelId)}
-                disabled={detectConflictsMutation.isLoading}
-                className="flex items-center px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50 transition-colors"
-            >
-              {detectConflictsMutation.isLoading ? (
-                  <LoadingSpinner size="sm" className="mr-2" />
-              ) : (
-                  <ExclamationTriangleIcon className="w-4 h-4 mr-2" />
-              )}
-              Check Conflicts
-            </button>
-
-            <button
-                onClick={() => analyzeImpactMutation.mutate({ modelId })}
-                disabled={analyzeImpactMutation.isLoading}
-                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 transition-colors"
-            >
-              {analyzeImpactMutation.isLoading ? (
-                  <LoadingSpinner size="sm" className="mr-2" />
-              ) : (
-                  <BeakerIcon className="w-4 h-4 mr-2" />
-              )}
-              Analyze Impact
-            </button>
-          </div>
-        </div>
-      </div>
-  );
 
   return (
       <ErrorBoundary>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="p-6 max-w-7xl mx-auto">
           {/* Header */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <button
-                      onClick={() => navigate('/dashboard')}
-                      className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                      title="Back to Dashboard"
-                  >
-                    <ArrowLeftIcon className="w-5 h-5" />
-                  </button>
+          <div className="mb-8">
+            <div className="flex items-center gap-4 mb-4">
+              <Link
+                  to="/models"
+                  className="flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeftIcon className="h-4 w-4 mr-1" />
+                Back to Models
+              </Link>
+            </div>
 
-                  <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                      <WrenchScrewdriverIcon className="h-6 w-6 text-blue-600" />
-                      Model Builder
-                    </h1>
-                    <p className="text-gray-600 mt-1">
-                      {model?.name} - Visual editor for CPQ models, rules, and pricing
-                    </p>
-                  </div>
-                </div>
+            <div className="flex justify-between items-start">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <CogIcon className="h-8 w-8 text-blue-600" />
+                  {model?.name || 'Model Builder'}
+                </h1>
+                <p className="mt-1 text-sm text-gray-500">
+                  Build and configure your product model with options, rules, and pricing
+                </p>
+              </div>
 
-                {/* Status indicators */}
-                <div className="flex items-center space-x-4">
-                  {validationResults && (
-                      <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-                          validationResults.isValid
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                      }`}>
-                        {validationResults.isValid ? (
-                            <CheckCircleIcon className="w-4 h-4" />
-                        ) : (
-                            <ExclamationTriangleIcon className="w-4 h-4" />
-                        )}
-                        {validationResults.isValid ? 'Valid' : 'Issues Found'}
-                      </div>
-                  )}
+              <div className="flex gap-2">
+                <Link
+                    to={`/models/${modelId}/configurations`}
+                    className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                >
+                  <RectangleStackIcon className="w-4 h-4 mr-2" />
+                  View Configurations
+                </Link>
 
-                  <div className="flex items-center text-sm text-gray-500">
-                    <ClockIcon className="w-4 h-4 mr-1" />
-                    Last updated: {model?.updatedAt ? new Date(model.updatedAt).toLocaleDateString() : 'N/A'}
-                  </div>
-                </div>
+                <button
+                    onClick={() => setShowDeleteModal(true)}
+                    className="flex items-center px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                >
+                  <TrashIcon className="w-4 h-4 mr-2" />
+                  Delete Model
+                </button>
               </div>
             </div>
+          </div>
 
-            {/* Tab Navigation */}
-            <div className="px-6">
-              <nav className="flex space-x-8 overflow-x-auto">
-                {tabs.map((tab) => {
-                  const isActive = activeTab === tab.id;
-                  const Icon = tab.icon;
-
-                  return (
-                      <button
-                          key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
-                          className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
-                              isActive
-                                  ? 'border-blue-500 text-blue-600'
-                                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                          }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        {tab.name}
-                      </button>
-                  );
-                })}
-              </nav>
-            </div>
+          {/* Tabs */}
+          <div className="border-b border-gray-200 mb-6">
+            <nav className="-mb-px flex space-x-8 overflow-x-auto">
+              {tabs.map((tab) => (
+                  <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`
+                  group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm
+                  ${activeTab === tab.id
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }
+                `}
+                  >
+                    <tab.icon
+                        className={`mr-2 h-5 w-5 ${
+                            activeTab === tab.id ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-500'
+                        }`}
+                    />
+                    {tab.name}
+                  </button>
+              ))}
+            </nav>
           </div>
 
           {/* Tab Content */}
-          <div className="space-y-6">
-            {/* Current tab description */}
-            {currentTab && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-center">
-                    <currentTab.icon className="w-5 h-5 text-blue-600 mr-2" />
-                    <div>
-                      <h3 className="text-sm font-medium text-blue-900">{currentTab.name}</h3>
-                      <p className="text-sm text-blue-700">{currentTab.description}</p>
-                    </div>
-                  </div>
-                </div>
-            )}
+          <AnimatePresence mode="wait">
+            <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+            >
+              {renderTabContent()}
+            </motion.div>
+          </AnimatePresence>
 
-            {/* Tab Content */}
-            <AnimatePresence mode="wait">
-              <motion.div
-                  key={activeTab}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.2 }}
-              >
-                {/* Overview Tab */}
-                {activeTab === 'overview' && <OverviewTab />}
-
-                {/* Options Tab */}
-                {activeTab === 'options' && (
-                    <OptionsManager
-                        modelId={modelId}
-                    />
-                )}
-
-                {/* Groups Tab */}
-                {activeTab === 'groups' && (
-                    <GroupsManager
-                        modelId={modelId}
-                    />
-                )}
-
-                {/* Rules Tab */}
-                {activeTab === 'rules' && (
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-center">
-                        <h3 className="text-lg font-semibold text-gray-900">Business Rules</h3>
-                        <button
-                            onClick={handleRuleCreate}
-                            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                        >
-                          <PlusIcon className="w-4 h-4 mr-2" />
-                          Add Rule
-                        </button>
-                      </div>
-
-                      <RuleEditor
-                          model={model}
-                          onRuleEdit={handleRuleEdit}
-                          onRuleDelete={handleRuleDelete}
-                      />
-                    </div>
-                )}
-
-                {/* Pricing Tab */}
-                {activeTab === 'pricing' && (
-                    <PricingRulesEditor
-                        modelId={modelId}
-                    />
-                )}
-
-                {/* Validation Tab */}
-                {activeTab === 'validation' && (
-                    <ModelValidation
-                        modelId={modelId}
-                        results={validationResults}
-                        isLoading={validateModelMutation.isLoading}
-                        onRevalidate={() => validateModelMutation.mutate(modelId)}
-                    />
-                )}
-
-                {/* Conflicts Tab */}
-                {activeTab === 'conflicts' && (
-                    <ConflictDetection
-                        modelId={modelId}
-                        results={conflictResults}
-                        isLoading={detectConflictsMutation.isLoading}
-                        onRedetect={() => detectConflictsMutation.mutate(modelId)}
-                    />
-                )}
-
-                {/* Impact Tab */}
-                {activeTab === 'impact' && (
-                    <ImpactAnalysis
-                        modelId={modelId}
-                        results={impactResults}
-                        isLoading={analyzeImpactMutation.isLoading}
-                        onReanalyze={() => analyzeImpactMutation.mutate({ modelId })}
-                    />
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </div>
-
-          {/* Rule Editor Modal */}
+          {/* Delete Modal */}
           <Modal
-              isOpen={showRuleEditor}
-              onClose={() => setShowRuleEditor(false)}
-              title={selectedRule ? 'Edit Rule' : 'Create Rule'}
-              size="large"
+              isOpen={showDeleteModal}
+              onClose={() => setShowDeleteModal(false)}
+              title="Delete Model"
+              variant="danger"
           >
-            <RuleEditor
-                rule={selectedRule}
-                model={model}
-                onSave={handleRuleSave}
-                onCancel={() => setShowRuleEditor(false)}
-            />
+            <div>
+              <p className="text-sm text-gray-600 mb-4">
+                Are you sure you want to delete "{model?.name}"? This action cannot be undone.
+              </p>
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+                <p className="text-sm text-red-800">
+                  <strong>Warning:</strong> All configurations created from this model will also be deleted.
+                </p>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                    onClick={() => setShowDeleteModal(false)}
+                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                    onClick={handleDeleteModel}
+                    disabled={deleteModelMutation.isLoading}
+                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {deleteModelMutation.isLoading ? 'Deleting...' : 'Delete Model'}
+                </button>
+              </div>
+            </div>
           </Modal>
         </div>
       </ErrorBoundary>
