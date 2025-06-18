@@ -1,8 +1,7 @@
 // frontend/src/contexts/AuthContext.jsx
-// Simplified authentication context for admin interface
+// Authentication context with proper error handling
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { cpqApi } from '../services/api';
 
 const AuthContext = createContext({});
 
@@ -24,16 +23,28 @@ export const AuthProvider = ({ children }) => {
     const checkAuth = async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        if (token) {
-          // In a real app, validate token with backend
-          const userData = localStorage.getItem('user_data');
-          if (userData) {
-            setUser(JSON.parse(userData));
+        const userData = localStorage.getItem('user_data');
+
+        if (token && userData) {
+          try {
+            const parsedUser = JSON.parse(userData);
+            setUser(parsedUser);
             setIsAuthenticated(true);
+            console.log('✅ Restored authentication for user:', parsedUser.username);
+          } catch (parseError) {
+            console.error('Failed to parse stored user data:', parseError);
+            // Clear invalid data
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_data');
           }
+        } else {
+          console.log('ℹ️ No stored authentication found');
         }
       } catch (error) {
         console.error('Auth check failed:', error);
+        // Clear potentially corrupted data
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
       } finally {
         setIsLoading(false);
       }
@@ -44,47 +55,71 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      // For demo purposes, check against hardcoded credentials
+      console.log('🔐 Attempting login for user:', username);
+
+      // Demo authentication - use actual backend in production
       const validCredentials = {
-        admin: { username: 'admin', password: 'admin123', role: 'admin' },
-        user: { username: 'user', password: 'user123', role: 'user' }
+        'admin': { username: 'admin', password: 'admin123', role: 'admin' },
+        'user': { username: 'user', password: 'user123', role: 'user' },
+        'demo': { username: 'demo', password: 'demo', role: 'admin' }
       };
 
-      const userCreds = Object.values(validCredentials).find(
-          cred => cred.username === username && cred.password === password
-      );
+      const userCreds = validCredentials[username.toLowerCase()];
 
-      if (userCreds) {
+      if (userCreds && userCreds.password === password) {
         // Simulate successful login
         const userData = {
           username: userCreds.username,
           role: userCreds.role,
-          id: Math.random().toString(36).substr(2, 9)
+          id: `user_${Date.now()}`,
+          login_time: new Date().toISOString()
         };
 
-        const fakeToken = btoa(JSON.stringify(userData));
+        // Create a demo token
+        const fakeToken = btoa(JSON.stringify({
+          user_id: userData.id,
+          username: userData.username,
+          role: userData.role,
+          exp: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+        }));
 
+        // Store authentication data
         localStorage.setItem('auth_token', fakeToken);
         localStorage.setItem('user_data', JSON.stringify(userData));
 
         setUser(userData);
         setIsAuthenticated(true);
 
-        return { success: true };
+        console.log('✅ Login successful for user:', userData.username);
+        return { success: true, user: userData };
       } else {
-        return { success: false, error: 'Invalid credentials' };
+        console.warn('❌ Invalid credentials for user:', username);
+        return {
+          success: false,
+          error: 'Invalid username or password. Try: admin/admin123'
+        };
       }
     } catch (error) {
       console.error('Login error:', error);
-      return { success: false, error: 'Login failed' };
+      return {
+        success: false,
+        error: 'Login failed due to an error. Please try again.'
+      };
     }
   };
 
   const logout = () => {
+    console.log('🚪 Logging out user:', user?.username);
+
+    // Clear authentication data
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_data');
+
+    // Reset state
     setUser(null);
     setIsAuthenticated(false);
+
+    // Redirect to login
     window.location.href = '/login';
   };
 

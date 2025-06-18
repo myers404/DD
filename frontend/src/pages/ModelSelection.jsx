@@ -17,7 +17,9 @@ import {
     RectangleStackIcon,
     WrenchScrewdriverIcon,
     DocumentDuplicateIcon,
-    ExclamationTriangleIcon
+    ExclamationTriangleIcon,
+    ChevronRightIcon,
+    EllipsisVerticalIcon
 } from '@heroicons/react/24/outline';
 import { cpqApi } from '../services/api';
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -35,11 +37,49 @@ const ModelSelection = () => {
     });
 
     // Fetch models
-    const { data: models, isLoading, error } = useQuery({
+    const { data: modelsResponse, isLoading, error } = useQuery({
         queryKey: ['models'],
         queryFn: cpqApi.getModels,
-        staleTime: 30 * 1000 // 30 seconds
+        staleTime: 30 * 1000, // 30 seconds
+        retry: 1,
+        onSuccess: (data) => {
+            console.log('Models data received:', data);
+        },
+        onError: (error) => {
+            console.error('Models query error:', error);
+        }
     });
+
+    // Safely extract models array with proper debugging
+    const models = React.useMemo(() => {
+        console.log('Processing models response:', modelsResponse);
+
+        if (!modelsResponse) {
+            console.log('No response data');
+            return [];
+        }
+
+        // Handle the actual API structure: response.data.models
+        if (modelsResponse.data && Array.isArray(modelsResponse.data.models)) {
+            console.log('Found models in response.data.models, length:', modelsResponse.data.models.length);
+            return modelsResponse.data.models;
+        }
+
+        // Fallback: response is direct array
+        if (Array.isArray(modelsResponse)) {
+            console.log('Response is direct array, length:', modelsResponse.length);
+            return modelsResponse;
+        }
+
+        // Fallback: response.data is array
+        if (modelsResponse.data && Array.isArray(modelsResponse.data)) {
+            console.log('Found array in response.data, length:', modelsResponse.data.length);
+            return modelsResponse.data;
+        }
+
+        console.error('Unexpected response structure, returning empty array');
+        return [];
+    }, [modelsResponse]);
 
     // Create model mutation
     const createMutation = useMutation({
@@ -71,7 +111,7 @@ const ModelSelection = () => {
 
     // Clone model mutation
     const cloneMutation = useMutation({
-        mutationFn: ({ modelId, name }) => cpqApi.cloneModel(modelId, { name }),
+        mutationFn: cpqApi.cloneModel,
         onSuccess: () => {
             queryClient.invalidateQueries(['models']);
             toast.success('Model cloned successfully');
@@ -82,49 +122,58 @@ const ModelSelection = () => {
     });
 
     const resetForm = () => {
-        setFormData({ name: '', description: '', category: '' });
+        setFormData({
+            name: '',
+            description: '',
+            category: ''
+        });
     };
 
-    const handleCreateModel = () => {
+    const handleCreateSubmit = (e) => {
+        e.preventDefault();
+
         if (!formData.name.trim()) {
             toast.error('Model name is required');
             return;
         }
+
         createMutation.mutate(formData);
     };
 
-    const handleDeleteModel = () => {
-        if (selectedModel?.id) {
+    const handleDeleteConfirm = () => {
+        if (selectedModel) {
             deleteMutation.mutate(selectedModel.id);
         }
     };
 
-    const handleCloneModel = (model, e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const cloneName = prompt(`Enter name for cloned model:`, `${model.name} (Copy)`);
-        if (cloneName) {
-            cloneMutation.mutate({ modelId: model.id, name: cloneName });
+    const handleCloneModel = (model) => {
+        cloneMutation.mutate(model.id);
+    };
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'Unknown';
+
+        try {
+            return new Date(dateString).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        } catch (e) {
+            console.error('Date formatting error:', e, 'for date:', dateString);
+            return 'Invalid Date';
         }
     };
 
-    const handleEditModel = (modelId) => {
-        // Navigate to model builder
-        window.location.href = `/models/${modelId}`;
-    };
-
-    const handleTestModel = (modelId) => {
-        // Open in new tab for testing
-        window.open(`/test/configure/${modelId}`, '_blank');
-    };
-
     const getModelStatus = (model) => {
-        const hasGroups = model.groups?.length > 0;
-        const hasOptions = model.options?.length > 0;
-        const hasRules = model.rules?.length > 0;
+        if (!model) return { label: 'Unknown', color: 'gray' };
 
-        if (!hasGroups || !hasOptions) {
-            return { label: 'Incomplete', color: 'red' };
+        const hasOptions = model.options && Array.isArray(model.options) && model.options.length > 0;
+        const hasGroups = model.groups && Array.isArray(model.groups) && model.groups.length > 0;
+        const hasRules = model.rules && Array.isArray(model.rules) && model.rules.length > 0;
+
+        if (!hasOptions && !hasGroups) {
+            return { label: 'Empty', color: 'red' };
         }
         if (!hasRules) {
             return { label: 'Basic', color: 'yellow' };
@@ -146,15 +195,22 @@ const ModelSelection = () => {
                 <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-500" />
                 <h3 className="mt-2 text-lg font-medium text-gray-900">Failed to load models</h3>
                 <p className="mt-1 text-sm text-gray-500">{error.message}</p>
-                <button
-                    onClick={() => queryClient.invalidateQueries(['models'])}
-                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                    Try Again
-                </button>
+                <div className="mt-4 space-y-2">
+                    <button
+                        onClick={() => queryClient.invalidateQueries(['models'])}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                        Try Again
+                    </button>
+                    <div className="text-xs text-gray-400">
+                        Debug: Check browser console for details
+                    </div>
+                </div>
             </div>
         );
     }
+
+    console.log('🔍 Final models array for render:', models, 'Length:', models.length);
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
@@ -178,140 +234,143 @@ const ModelSelection = () => {
             </div>
 
             {/* Models Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <AnimatePresence mode="popLayout">
-                    {models?.map((model) => {
-                        const modelStatus = getModelStatus(model);
-
-                        return (
-                            <motion.div
-                                key={model.id}
-                                layout
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow"
-                            >
-                                <div className="p-6">
-                                    {/* Model Header */}
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="flex items-center">
-                                            <CubeIcon className="h-8 w-8 text-blue-600 mr-3" />
-                                            <div>
-                                                <h3 className="text-lg font-semibold text-gray-900">
-                                                    {model.name}
-                                                </h3>
-                                                {model.category && (
-                                                    <span className="text-sm text-gray-500">{model.category}</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                            modelStatus.color === 'green'
-                                                ? 'bg-green-100 text-green-800'
-                                                : modelStatus.color === 'yellow'
-                                                    ? 'bg-yellow-100 text-yellow-800'
-                                                    : 'bg-red-100 text-red-800'
-                                        }`}>
-                      {modelStatus.label}
-                    </span>
-                                    </div>
-
-                                    {/* Model Description */}
-                                    {model.description && (
-                                        <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                                            {model.description}
-                                        </p>
-                                    )}
-
-                                    {/* Model Stats */}
-                                    <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-                                        <div className="bg-gray-50 rounded p-2">
-                                            <div className="text-lg font-semibold text-gray-900">
-                                                {model.groups?.length || 0}
-                                            </div>
-                                            <div className="text-xs text-gray-500">Groups</div>
-                                        </div>
-                                        <div className="bg-gray-50 rounded p-2">
-                                            <div className="text-lg font-semibold text-gray-900">
-                                                {model.options?.length || 0}
-                                            </div>
-                                            <div className="text-xs text-gray-500">Options</div>
-                                        </div>
-                                        <div className="bg-gray-50 rounded p-2">
-                                            <div className="text-lg font-semibold text-gray-900">
-                                                {model.rules?.length || 0}
-                                            </div>
-                                            <div className="text-xs text-gray-500">Rules</div>
-                                        </div>
-                                    </div>
-
-                                    {/* Timestamps */}
-                                    <div className="flex items-center text-xs text-gray-500 mb-4">
-                                        <ClockIcon className="h-3 w-3 mr-1" />
-                                        Updated {new Date(model.updatedAt || model.createdAt).toLocaleDateString()}
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div className="flex gap-2">
-                                        <Link
-                                            to={`/models/${model.id}`}
-                                            className="flex-1 flex items-center justify-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                                        >
-                                            <WrenchScrewdriverIcon className="h-4 w-4 mr-1" />
-                                            Build
-                                        </Link>
-                                        <Link
-                                            to={`/models/${model.id}/configurations`}
-                                            className="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                                            title="View Configurations"
-                                        >
-                                            <RectangleStackIcon className="h-4 w-4" />
-                                        </Link>
-                                        <button
-                                            onClick={(e) => handleCloneModel(model, e)}
-                                            className="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                                            title="Clone Model"
-                                        >
-                                            <DocumentDuplicateIcon className="h-4 w-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setSelectedModel(model);
-                                                setShowDeleteModal(true);
-                                            }}
-                                            className="flex items-center justify-center px-3 py-2 bg-gray-100 text-red-600 rounded-md hover:bg-red-50 transition-colors"
-                                            title="Delete Model"
-                                        >
-                                            <TrashIcon className="h-4 w-4" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        );
-                    })}
-                </AnimatePresence>
-            </div>
-
-            {/* Empty State */}
-            {(!models || models.length === 0) && (
+            {models.length === 0 ? (
                 <div className="text-center py-12">
                     <CubeIcon className="mx-auto h-12 w-12 text-gray-400" />
                     <h3 className="mt-2 text-lg font-medium text-gray-900">No models yet</h3>
                     <p className="mt-1 text-sm text-gray-500">
-                        Get started by creating your first product model
+                        Get started by creating your first product configuration model
                     </p>
                     <button
                         onClick={() => setShowCreateModal(true)}
-                        className="mt-4 flex items-center mx-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                        className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                     >
-                        <PlusIcon className="h-5 w-5 mr-2" />
-                        Create Model
+                        <PlusIcon className="h-4 w-4 mr-2" />
+                        Create First Model
                     </button>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <AnimatePresence>
+                        {models.map((model) => {
+                            const modelStatus = getModelStatus(model);
+
+                            return (
+                                <motion.div
+                                    key={model.id}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    className="bg-white rounded-lg border hover:shadow-lg transition-shadow duration-200"
+                                >
+                                    <div className="p-6">
+                                        {/* Header */}
+                                        <div className="flex items-start justify-between mb-4">
+                                            <div className="flex items-center">
+                                                <CubeIcon className="h-8 w-8 text-blue-600 mr-3" />
+                                                <div>
+                                                    <h3 className="text-lg font-semibold text-gray-900 truncate">
+                                                        {model.name || 'Unnamed Model'}
+                                                    </h3>
+                                                    <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${
+                                                        modelStatus.color === 'green'
+                                                            ? 'bg-green-100 text-green-800'
+                                                            : modelStatus.color === 'yellow'
+                                                                ? 'bg-yellow-100 text-yellow-800'
+                                                                : 'bg-red-100 text-red-800'
+                                                    }`}>
+                                                        {modelStatus.label}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Actions Menu */}
+                                            <div className="relative">
+                                                <button className="p-1 hover:bg-gray-100 rounded">
+                                                    <EllipsisVerticalIcon className="h-5 w-5 text-gray-400" />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Model Description */}
+                                        {model.description && (
+                                            <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                                                {model.description}
+                                            </p>
+                                        )}
+
+                                        {/* Model Stats */}
+                                        <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                                            <div className="bg-gray-50 rounded p-2">
+                                                <div className="text-lg font-semibold text-gray-900">
+                                                    {model.groups?.length || 0}
+                                                </div>
+                                                <div className="text-xs text-gray-500">Groups</div>
+                                            </div>
+                                            <div className="bg-gray-50 rounded p-2">
+                                                <div className="text-lg font-semibold text-gray-900">
+                                                    {model.options?.length || 0}
+                                                </div>
+                                                <div className="text-xs text-gray-500">Options</div>
+                                            </div>
+                                            <div className="bg-gray-50 rounded p-2">
+                                                <div className="text-lg font-semibold text-gray-900">
+                                                    {model.rules?.length || 0}
+                                                </div>
+                                                <div className="text-xs text-gray-500">Rules</div>
+                                            </div>
+                                        </div>
+
+                                        {/* Timestamps - Use actual API field names */}
+                                        <div className="flex items-center text-xs text-gray-500 mb-4">
+                                            <ClockIcon className="h-3 w-3 mr-1" />
+                                            Updated {formatDate(model.updated_at || model.created_at)}
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div className="flex gap-2">
+                                            <Link
+                                                to={`/models/${model.id}`}
+                                                className="flex-1 flex items-center justify-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                                            >
+                                                <WrenchScrewdriverIcon className="h-4 w-4 mr-1" />
+                                                Build
+                                            </Link>
+                                            <Link
+                                                to={`/models/${model.id}/configurations`}
+                                                className="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                                                title="View Configurations"
+                                            >
+                                                <RectangleStackIcon className="h-4 w-4" />
+                                            </Link>
+                                            <button
+                                                onClick={() => handleCloneModel(model)}
+                                                className="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                                                title="Clone Model"
+                                                disabled={cloneMutation.isLoading}
+                                            >
+                                                <DocumentDuplicateIcon className="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedModel(model);
+                                                    setShowDeleteModal(true);
+                                                }}
+                                                className="flex items-center justify-center px-3 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                                                title="Delete Model"
+                                            >
+                                                <TrashIcon className="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
+                    </AnimatePresence>
                 </div>
             )}
 
-            {/* Create Modal */}
+            {/* Create Model Modal */}
             <Modal
                 isOpen={showCreateModal}
                 onClose={() => {
@@ -320,66 +379,70 @@ const ModelSelection = () => {
                 }}
                 title="Create New Model"
             >
-                <div className="space-y-4">
+                <form onSubmit={handleCreateSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label htmlFor="name" className="block text-sm font-medium text-gray-700">
                             Model Name *
                         </label>
                         <input
                             type="text"
+                            id="name"
+                            required
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="e.g., Enterprise Server Configuration"
-                            autoFocus
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Enter model name"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                            Description
+                        </label>
+                        <textarea
+                            id="description"
+                            rows={3}
+                            value={formData.description}
+                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Describe this model..."
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="category" className="block text-sm font-medium text-gray-700">
                             Category
                         </label>
                         <input
                             type="text"
+                            id="category"
                             value={formData.category}
                             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="e.g., Hardware, Software, Services"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Description
-                        </label>
-                        <textarea
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            rows={3}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="Describe what this model configures..."
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="e.g., Electronics, Software, etc."
                         />
                     </div>
 
                     <div className="flex justify-end gap-3 pt-4">
                         <button
+                            type="button"
                             onClick={() => {
                                 setShowCreateModal(false);
                                 resetForm();
                             }}
-                            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
                         >
                             Cancel
                         </button>
                         <button
-                            onClick={handleCreateModel}
-                            disabled={createMutation.isLoading || !formData.name.trim()}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            type="submit"
+                            disabled={createMutation.isLoading}
+                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                         >
                             {createMutation.isLoading ? 'Creating...' : 'Create Model'}
                         </button>
                     </div>
-                </div>
+                </form>
             </Modal>
 
             {/* Delete Confirmation Modal */}
@@ -390,31 +453,36 @@ const ModelSelection = () => {
                     setSelectedModel(null);
                 }}
                 title="Delete Model"
-                variant="danger"
             >
-                <div>
-                    <p className="text-sm text-gray-600 mb-4">
-                        Are you sure you want to delete "{selectedModel?.name}"? This action cannot be undone.
-                    </p>
-                    <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
-                        <p className="text-sm text-red-800">
-                            <strong>Warning:</strong> All configurations created from this model will also be deleted.
+                <div className="space-y-4">
+                    <div className="flex items-center">
+                        <ExclamationTriangleIcon className="h-6 w-6 text-red-600 mr-3" />
+                        <p className="text-sm text-gray-900">
+                            Are you sure you want to delete "{selectedModel?.name}"? This action cannot be undone.
                         </p>
                     </div>
-                    <div className="flex justify-end gap-3">
+
+                    <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                        <p className="text-sm text-red-800">
+                            <strong>Warning:</strong> This will permanently delete the model and all its configurations.
+                        </p>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4">
                         <button
+                            type="button"
                             onClick={() => {
                                 setShowDeleteModal(false);
                                 setSelectedModel(null);
                             }}
-                            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200"
                         >
                             Cancel
                         </button>
                         <button
-                            onClick={handleDeleteModel}
+                            onClick={handleDeleteConfirm}
                             disabled={deleteMutation.isLoading}
-                            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 disabled:opacity-50"
                         >
                             {deleteMutation.isLoading ? 'Deleting...' : 'Delete Model'}
                         </button>

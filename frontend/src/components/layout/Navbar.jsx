@@ -36,7 +36,7 @@ const Navbar = () => {
 
               <button
                   onClick={logout}
-                  className="flex items-center text-sm text-gray-500 hover:text-gray-700"
+                  className="flex items-center text-sm text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md transition-colors"
               >
                 <ArrowLeftOnRectangleIcon className="h-5 w-5 mr-1" />
                 Logout

@@ -16,7 +16,8 @@ import {
   WrenchScrewdriverIcon,
   UserGroupIcon,
   CogIcon,
-  CurrencyDollarIcon
+  CurrencyDollarIcon,
+  XCircleIcon
 } from '@heroicons/react/24/outline';
 import { cpqApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,18 +55,43 @@ const Dashboard = () => {
     enabled: false // Disable for now if endpoint doesn't exist
   });
 
-  // Safely extract data arrays
-  const models = Array.isArray(modelsResponse)
-      ? modelsResponse
-      : Array.isArray(modelsResponse?.data)
-          ? modelsResponse.data
-          : [];
+  // Safely extract data arrays - Based on actual API response structure
+  const models = React.useMemo(() => {
+    if (!modelsResponse) return [];
 
-  const configurations = Array.isArray(configurationsResponse)
-      ? configurationsResponse
-      : Array.isArray(configurationsResponse?.data)
-          ? configurationsResponse.data
-          : [];
+    // Handle backend response: { success: true, data: { models: [...], total: N } }
+    if (modelsResponse.data && Array.isArray(modelsResponse.data.models)) {
+      return modelsResponse.data.models;
+    }
+
+    // Fallback: if response is direct array
+    if (Array.isArray(modelsResponse)) {
+      return modelsResponse;
+    }
+
+    console.warn('Unexpected models response structure:', modelsResponse);
+    return [];
+  }, [modelsResponse]);
+
+  const configurations = React.useMemo(() => {
+    if (!configurationsResponse) return [];
+
+    // Handle backend response structure
+    if (configurationsResponse.data && Array.isArray(configurationsResponse.data.configurations)) {
+      return configurationsResponse.data.configurations;
+    }
+
+    if (configurationsResponse.data && Array.isArray(configurationsResponse.data)) {
+      return configurationsResponse.data;
+    }
+
+    if (Array.isArray(configurationsResponse)) {
+      return configurationsResponse;
+    }
+
+    console.warn('Unexpected configurations response structure:', configurationsResponse);
+    return [];
+  }, [configurationsResponse]);
 
   // Calculate stats safely
   const stats = {
@@ -102,6 +128,7 @@ const Dashboard = () => {
         return date.toLocaleDateString();
       }
     } catch (e) {
+      console.error('Date formatting error:', e, 'for date:', dateString);
       return 'Unknown';
     }
   };
@@ -162,10 +189,7 @@ const Dashboard = () => {
               <CubeIcon className="h-8 w-8 text-blue-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Total Models</p>
-                <p className="text-2xl font-semibold text-gray-900">{stats.totalModels}</p>
-                <p className="text-xs text-green-600 mt-1">
-                  {stats.activeModels} active
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalModels}</p>
               </div>
             </div>
           </motion.div>
@@ -180,10 +204,7 @@ const Dashboard = () => {
               <RectangleStackIcon className="h-8 w-8 text-green-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Configurations</p>
-                <p className="text-2xl font-semibold text-gray-900">{stats.totalConfigurations}</p>
-                <p className="text-xs text-green-600 mt-1">
-                  {stats.validConfigurations} valid
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalConfigurations}</p>
               </div>
             </div>
           </motion.div>
@@ -198,10 +219,7 @@ const Dashboard = () => {
               <CogIcon className="h-8 w-8 text-purple-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Total Options</p>
-                <p className="text-2xl font-semibold text-gray-900">{stats.totalOptions}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Across all models
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalOptions}</p>
               </div>
             </div>
           </motion.div>
@@ -215,16 +233,14 @@ const Dashboard = () => {
             <div className="flex items-center">
               <WrenchScrewdriverIcon className="h-8 w-8 text-orange-600" />
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500">Business Rules</p>
-                <p className="text-2xl font-semibold text-gray-900">{stats.totalRules}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Constraint rules
-                </p>
+                <p className="text-sm font-medium text-gray-500">Total Rules</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalRules}</p>
               </div>
             </div>
           </motion.div>
         </div>
 
+        {/* Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Models */}
           <div className="bg-white rounded-lg border">
@@ -240,7 +256,15 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="p-6">
-              {models.length === 0 ? (
+              {modelsError ? (
+                  <div className="text-center py-8">
+                    <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-gray-400" />
+                    <p className="mt-2 text-sm text-gray-500">Unable to load models</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Check your backend connection
+                    </p>
+                  </div>
+              ) : models.length === 0 ? (
                   <div className="text-center py-8">
                     <CubeIcon className="mx-auto h-12 w-12 text-gray-400" />
                     <p className="mt-2 text-sm text-gray-500">No models yet</p>
@@ -320,25 +344,20 @@ const Dashboard = () => {
                               {config.is_valid ? (
                                   <CheckCircleIcon className="h-5 w-5 text-green-500 mr-3" />
                               ) : (
-                                  <ExclamationTriangleIcon className="h-5 w-5 text-yellow-500 mr-3" />
+                                  <XCircleIcon className="h-5 w-5 text-red-500 mr-3" />
                               )}
                               <div>
                                 <p className="text-sm font-medium text-gray-900">
                                   {model?.name || 'Unknown Model'}
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  {config.user_email || 'Anonymous'} • {formatDate(config.createdAt)}
+                                  {formatDate(config.created_at)} • {config.is_valid ? 'Valid' : 'Invalid'}
                                 </p>
                               </div>
                             </div>
-                            {model && (
-                                <Link
-                                    to={`/models/${model.id}/configurations`}
-                                    className="text-sm text-blue-600 hover:text-blue-700"
-                                >
-                                  View
-                                </Link>
-                            )}
+                            <div className="text-xs text-gray-400">
+                              {config.selected_options?.length || 0} selections
+                            </div>
                           </div>
                       );
                     })}
@@ -349,24 +368,12 @@ const Dashboard = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="bg-blue-50 rounded-lg p-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+        <div className="bg-white rounded-lg border p-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Link
-                to="/models"
-                className="flex items-center p-4 bg-white rounded-lg hover:shadow-md transition-shadow"
-            >
-              <CubeIcon className="h-8 w-8 text-blue-600 mr-3" />
-              <div>
-                <p className="font-medium text-gray-900">Manage Models</p>
-                <p className="text-sm text-gray-500">Create and edit product models</p>
-              </div>
-              <ArrowRightIcon className="h-5 w-5 text-gray-400 ml-auto" />
-            </Link>
-
-            <Link
-                to={models.length > 0 ? `/models/${models[0].id}` : '/models'}
-                className="flex items-center p-4 bg-white rounded-lg hover:shadow-md transition-shadow"
+                to={models.length > 0 ? `/models/${models[0]?.id}` : '/models'}
+                className="flex items-center p-4 bg-white rounded-lg hover:shadow-md transition-shadow border"
             >
               <WrenchScrewdriverIcon className="h-8 w-8 text-green-600 mr-3" />
               <div>
@@ -377,13 +384,25 @@ const Dashboard = () => {
             </Link>
 
             <Link
-                to={models.length > 0 ? `/models/${models[0].id}/configurations` : '/models'}
-                className="flex items-center p-4 bg-white rounded-lg hover:shadow-md transition-shadow"
+                to={models.length > 0 ? `/models/${models[0]?.id}/configurations` : '/models'}
+                className="flex items-center p-4 bg-white rounded-lg hover:shadow-md transition-shadow border"
             >
               <RectangleStackIcon className="h-8 w-8 text-purple-600 mr-3" />
               <div>
                 <p className="font-medium text-gray-900">View Configurations</p>
                 <p className="text-sm text-gray-500">See user configurations</p>
+              </div>
+              <ArrowRightIcon className="h-5 w-5 text-gray-400 ml-auto" />
+            </Link>
+
+            <Link
+                to="/models"
+                className="flex items-center p-4 bg-white rounded-lg hover:shadow-md transition-shadow border"
+            >
+              <CubeIcon className="h-8 w-8 text-blue-600 mr-3" />
+              <div>
+                <p className="font-medium text-gray-900">Create New Model</p>
+                <p className="text-sm text-gray-500">Start building a new model</p>
               </div>
               <ArrowRightIcon className="h-5 w-5 text-gray-400 ml-auto" />
             </Link>
