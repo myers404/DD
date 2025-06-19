@@ -40,17 +40,48 @@ const ConfigurationsList = () => {
     // Fetch configurations for this model
     const { data: configurationsResponse, isLoading, error } = useQuery({
         queryKey: ['session-configurations', modelId, { status: statusFilter, sort: sortBy, order: sortOrder }],
-        queryFn: () => cpqApi.getSessionConfigurations(modelId, {
-            status: statusFilter !== 'all' ? statusFilter : undefined,
-            sort_by: sortBy,
-            sort_order: sortOrder
-        }),
+        queryFn: async () => {
+            console.log('Fetching session configurations for model:', modelId, {
+                status: statusFilter,
+                sort_by: sortBy,
+                sort_order: sortOrder
+            });
+            
+            const response = await cpqApi.getSessionConfigurations(modelId, {
+                status: statusFilter !== 'all' ? statusFilter : undefined,
+                sort_by: sortBy,
+                sort_order: sortOrder
+            });
+            
+            console.log('Session configurations response:', response);
+            return response;
+        },
         enabled: !!modelId,
         refetchInterval: 30000 // Refresh every 30 seconds
     });
     
     // Extract configurations array from response
-    const configurations = configurationsResponse?.configurations || [];
+    // Debug log to see the structure
+    console.log('configurationsResponse structure:', configurationsResponse);
+    
+    // Handle different response structures
+    let configurations = [];
+    if (configurationsResponse) {
+        // If it's already an array, use it directly
+        if (Array.isArray(configurationsResponse)) {
+            configurations = configurationsResponse;
+        }
+        // If it has a configurations property, use that
+        else if (configurationsResponse.configurations) {
+            configurations = configurationsResponse.configurations;
+        }
+        // If it has data.configurations, use that
+        else if (configurationsResponse.data?.configurations) {
+            configurations = configurationsResponse.data.configurations;
+        }
+    }
+    
+    console.log('Extracted configurations:', configurations, 'Count:', configurations.length);
 
     // Filter configurations based on search
     const filteredConfigurations = configurations?.filter(config => {
@@ -67,8 +98,8 @@ const ConfigurationsList = () => {
     // Calculate stats
     const stats = {
         total: configurations?.length || 0,
-        complete: configurations?.filter(c => c.status === 'complete').length || 0,
-        incomplete: configurations?.filter(c => c.status === 'incomplete').length || 0,
+        complete: configurations?.filter(c => c.status === 'complete' || c.session_status === 'completed').length || 0,
+        incomplete: configurations?.filter(c => c.status === 'incomplete' || c.session_status === 'draft').length || 0,
         valid: configurations?.filter(c => c.is_valid).length || 0
     };
 
@@ -274,7 +305,7 @@ const ConfigurationsList = () => {
                                             </div>
                                             <div className="flex items-center text-gray-600">
                                                 <ClockIcon className="h-4 w-4 mr-2" />
-                                                {formatDate(config.createdAt)}
+                                                {formatDate(config.created_at || config.createdAt)}
                                             </div>
                                             <div className="flex items-center text-gray-600">
                                                 <CurrencyDollarIcon className="h-4 w-4 mr-2" />
@@ -319,7 +350,7 @@ const ConfigurationsList = () => {
                                                         </div>
                                                         <div className="flex justify-between">
                                                             <dt className="text-gray-500">Last Updated:</dt>
-                                                            <dd className="text-gray-900">{formatDate(config.updatedAt)}</dd>
+                                                            <dd className="text-gray-900">{formatDate(config.updated_at || config.updatedAt)}</dd>
                                                         </div>
                                                         {config.metadata && (
                                                             <>

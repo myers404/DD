@@ -287,11 +287,15 @@ export const cpqApi = {
   
   // V2 Session-based configurations for a model
   getSessionConfigurations: async (modelId, params = {}) => {
+    console.log('getSessionConfigurations called with:', { modelId, params });
+    
     // Create a custom axios instance for v2 API
     const v2Client = axios.create({
       ...apiClient.defaults,
       baseURL: apiClient.defaults.baseURL.replace('/api/v1', '/api/v2')
     });
+    
+    console.log('V2 Client baseURL:', v2Client.defaults.baseURL);
     
     // Copy interceptors
     v2Client.interceptors.request.use(apiClient.interceptors.request.handlers[0].fulfilled);
@@ -300,8 +304,17 @@ export const cpqApi = {
       apiClient.interceptors.response.handlers[0].rejected
     );
     
-    const response = await v2Client.get(`/models/${modelId}/configurations`, { params });
-    return response.data;
+    const url = `/models/${modelId}/configurations`;
+    console.log('Making request to:', v2Client.defaults.baseURL + url);
+    
+    try {
+      const response = await v2Client.get(url, { params });
+      console.log('V2 configurations response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching session configurations:', error);
+      throw error;
+    }
   },
 
   getConfiguration: async (configId) => {

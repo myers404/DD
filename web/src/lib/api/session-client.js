@@ -3,11 +3,17 @@
 
 class SessionApiClient {
   constructor(baseUrl, options = {}) {
-    // Use relative URL when running in dev mode to leverage Vite proxy
-    const defaultUrl = window.location.hostname === 'localhost' && window.location.port === '5173' 
-      ? '/api/v2' 
-      : 'http://localhost:8080/api/v2';
-    this.baseUrl = baseUrl || window.__API_BASE_URL__ || defaultUrl;
+    // For development, use relative URL to leverage Vite proxy
+    // For production, use full URL
+    let defaultUrl;
+    if (typeof window !== 'undefined') {
+      const isDev = window.location.hostname === 'localhost' && window.location.port === '5173';
+      defaultUrl = isDev ? '/api/v2' : 'http://localhost:8080/api/v2';
+    } else {
+      defaultUrl = 'http://localhost:8080/api/v2';
+    }
+    
+    this.baseUrl = baseUrl || window.__API_BASE_URL__?.replace('/v1', '/v2') || defaultUrl;
     this.modelId = options.modelId;
     this.authToken = options.authToken || localStorage.getItem('auth_token');
     this.sessionToken = options.sessionToken || localStorage.getItem('session_token');
@@ -222,6 +228,17 @@ class SessionApiClient {
     if (!id) throw new Error('Model ID required');
     
     const response = await this.request(`/models/${id}/groups`);
+    
+    // Handle wrapped response format
+    if (response && typeof response === 'object') {
+      if (response.groups && Array.isArray(response.groups)) {
+        return response.groups;
+      }
+      if (response.data && response.data.groups && Array.isArray(response.data.groups)) {
+        return response.data.groups;
+      }
+    }
+    
     return Array.isArray(response) ? response : [];
   }
 
@@ -230,6 +247,17 @@ class SessionApiClient {
     if (!id) throw new Error('Model ID required');
     
     const response = await this.request(`/models/${id}/options`);
+    
+    // Handle wrapped response format
+    if (response && typeof response === 'object') {
+      if (response.options && Array.isArray(response.options)) {
+        return response.options;
+      }
+      if (response.data && response.data.options && Array.isArray(response.data.options)) {
+        return response.data.options;
+      }
+    }
+    
     return Array.isArray(response) ? response : [];
   }
 
@@ -238,6 +266,17 @@ class SessionApiClient {
     if (!id) throw new Error('Model ID required');
     
     const response = await this.request(`/models/${id}/rules`);
+    
+    // Handle wrapped response format
+    if (response && typeof response === 'object') {
+      if (response.rules && Array.isArray(response.rules)) {
+        return response.rules;
+      }
+      if (response.data && response.data.rules && Array.isArray(response.data.rules)) {
+        return response.data.rules;
+      }
+    }
+    
     return Array.isArray(response) ? response : [];
   }
 
@@ -274,7 +313,12 @@ class SessionApiClient {
         return session;
       }
     } catch (error) {
-      console.error('Failed to recover session:', error);
+      // If it's a 404, the session doesn't exist anymore
+      if (error.status === 404) {
+        console.log('Session not found, will create new one');
+      } else {
+        console.error('Failed to recover session:', error);
+      }
     }
 
     // Clear invalid session data

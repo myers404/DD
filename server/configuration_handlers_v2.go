@@ -362,15 +362,8 @@ func (h *ConfigurationHandlersV2) GetModelConfigurations(w http.ResponseWriter, 
 			totalPrice = session.PricingState.TotalPrice
 		}
 
-		// Get selected options with details
-		selectedOptions := []map[string]interface{}{}
-		for optionID, quantity := range session.Selections {
-			selectedOptions = append(selectedOptions, map[string]interface{}{
-				"option_id": optionID,
-				"quantity":  quantity,
-				"name":      optionID, // In real app, would look up option name
-			})
-		}
+		// Get selected options - keep as map for frontend compatibility
+		selectedOptions := session.Selections
 
 		// Determine configuration status
 		configStatus := "incomplete"

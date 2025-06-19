@@ -1,0 +1,25 @@
+2025/06/19 14:11:23 🚀 Starting CPQ Enterprise Configuration System...
+2025/06/19 14:11:23 🔧 Connecting to database...
+2025/06/19 14:11:23 ✅ Connected to PostgreSQL database: cpq_system
+2025/06/19 14:11:23 ✅ Database connection established
+2025/06/19 14:11:23 ✅ Database connected successfully
+2025/06/19 14:11:23 🔐 Authentication service initialized
+2025/06/19 14:11:23 🔧 Initializing CPQ service with database support...
+2025/06/19 14:11:23 ✅ CPQ service initialized with database and cache support
+2025/06/19 14:11:23 📊 Cache type: memory
+2025/06/19 14:11:23 🔐 Authentication routes configured
+2025/06/19 14:11:23 🔧 Enabling session-based configuration support...
+2025/06/19 14:11:23 🔐 Authentication routes configured
+2025/06/19 14:11:23 🔐 Authentication routes configured
+2025/06/19 14:11:23 ✅ V2 configuration routes configured
+2025/06/19 14:11:23 ✅ V2 Session-based API routes configured
+2025/06/19 14:11:23 ✅ Session support enabled
+2025/06/19 14:11:23 ✅ Session-based v2 API enabled at /api/v2
+2025/06/19 14:11:23 ✅ CPQ API Server starting on port 8080
+2025/06/19 14:11:23 🌐 Health check: http://localhost:8080/api/v1/health
+2025/06/19 14:11:23 📋 Environment: development
+2025/06/19 14:11:23 🎯 All 56 REST API endpoints available
+2025/06/19 14:11:23 🚀 CPQ API Server starting on port 8080
+2025/06/19 14:11:23 📊 Server configuration: ReadTimeout=30s, WriteTimeout=30s
+2025/06/19 14:11:23 🔐 Authentication service available
+signal: killed

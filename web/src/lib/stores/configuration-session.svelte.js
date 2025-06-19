@@ -5,23 +5,27 @@ import SessionApiClient from '../api/session-client.js';
 
 class ConfigurationSessionStore {
   constructor() {
+    // Core session state
     this.modelId = $state(null);
     this.sessionId = $state(null);
     this.sessionToken = $state(null);
     this.sessionStatus = $state('draft');
     this.expiresAt = $state(null);
     
+    // Model data - initialize with null instead of empty arrays
     this.model = $state(null);
-    this.groups = $state([]);
-    this.options = $state([]);
-    this.rules = $state([]);
+    this.groups = $state(null);
+    this.options = $state(null);
+    this.rules = $state(null);
     this.selections = $state({});
     
+    // Session state
     this.configuration = $state(null);
     this.validationResult = $state(null);
     this.pricingResult = $state(null);
-    this.availableOptions = $state([]);
+    this.availableOptions = $state(null);
     
+    // UI state
     this.isLoading = $state(false);
     this.isSaving = $state(false);
     this.error = $state(null);
@@ -35,8 +39,14 @@ class ConfigurationSessionStore {
   async initialize(modelId, options = {}) {
     this.modelId = modelId;
     
-    // Create API client
-    this.api = new SessionApiClient(options.apiUrl, {
+    // Create API client with explicit v2 URL if not provided
+    const apiUrl = options.apiUrl || (
+      window.location.hostname === 'localhost' && window.location.port === '5173'
+        ? '/api/v2'  // Use proxy in dev
+        : 'http://localhost:8080/api/v2'
+    );
+    
+    this.api = new SessionApiClient(apiUrl, {
       modelId,
       authToken: options.authToken,
       timeout: options.timeout || 30000
@@ -130,10 +140,11 @@ class ConfigurationSessionStore {
         this.api.getModelRules()
       ]);
 
+      // Ensure arrays are properly assigned
       this.model = model;
-      this.groups = groups;
-      this.options = options;
-      this.rules = rules;
+      this.groups = Array.isArray(groups) ? groups : [];
+      this.options = Array.isArray(options) ? options : [];
+      this.rules = Array.isArray(rules) ? rules : [];
 
       console.log('Model loaded:', {
         modelId: this.modelId,
@@ -221,7 +232,7 @@ class ConfigurationSessionStore {
       this.configuration = result.configuration || result.updated_config;
       this.validationResult = result.validation_result;
       this.pricingResult = result.price_breakdown;
-      this.availableOptions = result.available_options || [];
+      this.availableOptions = Array.isArray(result.available_options) ? result.available_options : [];
       
       // Check and deselect invalid options
       this.checkAndDeselectInvalidOptions(this.availableOptions);

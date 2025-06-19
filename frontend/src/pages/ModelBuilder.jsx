@@ -371,7 +371,10 @@ const ModelBuilder = () => {
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-lg border">
+                <Link
+                  to={`/models/${modelId}/configurations`}
+                  className="bg-white p-4 rounded-lg border hover:shadow-md transition-shadow block"
+                >
                   <div className="flex items-center">
                     <RectangleStackIcon className="h-8 w-8 text-orange-600" />
                     <div className="ml-3">
@@ -381,7 +384,7 @@ const ModelBuilder = () => {
                       </p>
                     </div>
                   </div>
-                </div>
+                </Link>
               </div>
           )}
 

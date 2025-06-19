@@ -26,8 +26,8 @@
         message.innerHTML = `
       <div class="message-content">
         <h3>✅ Configuration Complete!</h3>
-        <p>Configuration ID: <code>${config.id}</code></p>
-        <p>Total Price: <strong>$${config.pricing.total_price.toFixed(2)}</strong></p>
+        <p>Session ID: <code>${config.sessionId || config.id}</code></p>
+        <p>Total Price: <strong>$${(config.totalPrice || config.pricing?.total_price || 0).toFixed(2)}</strong></p>
         <button onclick="this.parentElement.parentElement.remove()">Close</button>
       </div>
     `;
@@ -49,6 +49,7 @@
     <ConfiguratorApp
             {modelId}
             {theme}
+            useSessionApi={true}
             configurationId={configId}
             onComplete={handleComplete}
             onError={handleError}

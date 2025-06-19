@@ -120,8 +120,15 @@ func (s *SessionService) UpdateSessionConfiguration(sessionID string, selections
 	
 	// Cache validation and pricing results
 	session.ValidationState = &result.ValidationResult
-	if result.PricingResult != nil {
-		session.PricingState = result.PricingResult
+	
+	// Get detailed pricing breakdown
+	priceBreakdown := session.Configurator.GetDetailedPrice()
+	
+	// Always update pricing state with current configuration pricing
+	session.PricingState = &cpq.PricingResult{
+		BasePrice:  priceBreakdown.BasePrice,
+		TotalPrice: priceBreakdown.TotalPrice,
+		Breakdown:  &priceBreakdown,
 	}
 	
 	// Save session state
@@ -143,7 +150,11 @@ func (s *SessionService) ValidateSessionConfiguration(sessionID string) (*cpq.Va
 	
 	// Cache the result
 	session.ValidationState = &result
-	s.sessionStore.SaveSession(session)
+	if err := s.sessionStore.SaveSession(session); err != nil {
+		// Log error but don't fail the validation
+		// Session state will be updated on next operation
+		return &result, nil
+	}
 	
 	return &result, nil
 }

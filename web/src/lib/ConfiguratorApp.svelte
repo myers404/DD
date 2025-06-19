@@ -33,7 +33,11 @@
   }
   
   // Computed values - works with both stores
-  const visibleGroups = $derived((useSessionApi ? store.groups : store.groups)?.filter(g => g.is_active !== false) || []);
+  const visibleGroups = $derived(
+    Array.isArray(store.groups) 
+      ? store.groups.filter(g => g.is_active !== false) 
+      : []
+  );
   const isComplete = $derived(store.isValid && store.selectedCount > 0);
   const sessionInfo = $derived(useSessionApi ? {
     status: store.sessionStatus,
@@ -41,11 +45,25 @@
     sessionId: store.sessionId
   } : null);
   
+  // Debug logging
+  $effect(() => {
+    if (useSessionApi) {
+      console.log('Session Store State:', {
+        groups: store.groups,
+        options: store.options,
+        model: store.model,
+        visibleGroups,
+        sessionId: store.sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+  
   onMount(async () => {
     if (useSessionApi) {
       // Initialize session-based store
+      // Let the SessionApiClient determine the correct URL based on environment
       await store.initialize(modelId, {
-        apiUrl: apiUrl.replace('/v1', '/v2'),
         authToken: localStorage.getItem('auth_token')
       });
     } else {
@@ -95,7 +113,6 @@
     store.error = null;
     if (useSessionApi) {
       store.initialize(modelId, {
-        apiUrl: apiUrl.replace('/v1', '/v2'),
         authToken: localStorage.getItem('auth_token')
       });
     } else {

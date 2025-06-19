@@ -33,9 +33,10 @@ func (s *PostgresSessionStore) CreateSession(modelID, userID string, configurato
 	// Get current configuration
 	config := configurator.GetCurrentConfiguration()
 	
-	// For now, we'll store an empty MTBDD snapshot
-	// In a full implementation, we'd serialize the actual MTBDD state
-	mtbddSnapshot := []byte("{}")
+	// Store a placeholder MTBDD snapshot
+	// Since we're reconstructing the configurator from the model anyway,
+	// we don't need to serialize the MTBDD state for now
+	mtbddSnapshot := []byte("PLACEHOLDER")
 	
 	// Create selections map
 	selections := make(map[string]int)
@@ -183,19 +184,29 @@ func (s *PostgresSessionStore) GetSessionByToken(token string) (*ConfigurationSe
 
 // SaveSession saves the current session state
 func (s *PostgresSessionStore) SaveSession(session *ConfigurationSession) error {
-	// For now, we'll store an empty MTBDD snapshot
-	mtbddSnapshot := []byte("{}")
+	// Store a placeholder MTBDD snapshot
+	mtbddSnapshot := []byte("PLACEHOLDER")
 	
 	// Prepare JSON fields
 	selectionsJSON, _ := json.Marshal(session.Selections)
-	metadataJSON, _ := json.Marshal(session.Metadata)
+	
+	var metadataJSON []byte
+	if session.Metadata != nil {
+		metadataJSON, _ = json.Marshal(session.Metadata)
+	} else {
+		metadataJSON = []byte("{}")
+	}
 	
 	var validationJSON, pricingJSON []byte
 	if session.ValidationState != nil {
 		validationJSON, _ = json.Marshal(session.ValidationState)
+	} else {
+		validationJSON = []byte("null")
 	}
 	if session.PricingState != nil {
 		pricingJSON, _ = json.Marshal(session.PricingState)
+	} else {
+		pricingJSON = []byte("null")
 	}
 	
 	query := `
@@ -445,10 +456,14 @@ func (s *PostgresSessionStore) GetStatistics() (*SessionStatistics, error) {
 
 // reconstructConfigurator rebuilds the configurator from MTBDD snapshot
 func (s *PostgresSessionStore) reconstructConfigurator(session *ConfigurationSession, mtbddSnapshot []byte) error {
-	// First, we need to get the model
-	// In a real implementation, you'd have a model service/repository
-	// For now, we'll assume the model is available through some means
+	// Check if this is a placeholder snapshot
+	if string(mtbddSnapshot) == "PLACEHOLDER" {
+		// For placeholder snapshots, we don't reconstruct the configurator here
+		// The SessionService will handle creating a fresh configurator
+		return nil
+	}
 	
+	// For real MTBDD snapshots (future implementation)
 	// Create a new MTBDD and deserialize
 	mtbddInstance := mtbdd.NewMTBDD()
 	if err := mtbddInstance.DeserializeCompressed(mtbddSnapshot); err != nil {
