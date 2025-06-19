@@ -284,6 +284,25 @@ export const cpqApi = {
     const response = await apiClient.get('/configurations', { params });
     return response.data;
   },
+  
+  // V2 Session-based configurations for a model
+  getSessionConfigurations: async (modelId, params = {}) => {
+    // Create a custom axios instance for v2 API
+    const v2Client = axios.create({
+      ...apiClient.defaults,
+      baseURL: apiClient.defaults.baseURL.replace('/api/v1', '/api/v2')
+    });
+    
+    // Copy interceptors
+    v2Client.interceptors.request.use(apiClient.interceptors.request.handlers[0].fulfilled);
+    v2Client.interceptors.response.use(
+      apiClient.interceptors.response.handlers[0].fulfilled,
+      apiClient.interceptors.response.handlers[0].rejected
+    );
+    
+    const response = await v2Client.get(`/models/${modelId}/configurations`, { params });
+    return response.data;
+  },
 
   getConfiguration: async (configId) => {
     const response = await apiClient.get(`/configurations/${configId}`);

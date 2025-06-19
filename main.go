@@ -132,6 +132,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Failed to create server: %v", err)
 	}
+	
+	// Enable session support if we have database and CPQServiceV2
+	if db != nil {
+		if cpqServiceV2, ok := cpqService.(*server.CPQServiceV2); ok {
+			log.Printf("🔧 Enabling session-based configuration support...")
+			sessionStore := server.NewPostgresSessionStoreFromDB(db)
+			if err := apiServer.EnableSessionSupport(sessionStore, cpqServiceV2); err != nil {
+				log.Printf("⚠️ Failed to enable session support: %v", err)
+			} else {
+				log.Printf("✅ Session-based v2 API enabled at /api/v2")
+			}
+		}
+	}
 
 	// Start server
 	go func() {

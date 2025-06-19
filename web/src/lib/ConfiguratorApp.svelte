@@ -1,206 +1,238 @@
 <!-- web/src/lib/ConfiguratorApp.svelte -->
-<!-- Simplified design matching ConstraintTester style -->
+<!-- Simplified CPQ UI with no animations and immediate feedback -->
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import { createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import { configStore } from './stores/configuration.svelte.js';
+  import { createConfigurationSessionStore } from './stores/configuration-session.svelte.js';
   import LoadingSpinner from './components/LoadingSpinner.svelte';
   import ErrorBoundary from './components/ErrorBoundary.svelte';
   import OptionGroup from './components/OptionGroup.svelte';
   import PricingDisplay from './components/PricingDisplay.svelte';
   import ValidationDisplay from './components/ValidationDisplay.svelte';
-
+  import ProgressIndicator from './components/ProgressIndicator.svelte';
+  import ConfigurationSummary from './components/ConfigurationSummary.svelte';
+  
   let {
     modelId,
     theme = 'light',
     apiUrl = '/api/v1',
     embedMode = false,
     onComplete = null,
-    onConfigurationChange = null,
-    onError = null,
-    configurationId = null
+    configurationId = null,
+    useSessionApi = false
   } = $props();
-
-  const dispatch = createEventDispatcher();
-
+  
   let mounted = $state(false);
-
+  
+  // Choose store based on API version
+  let store = useSessionApi ? createConfigurationSessionStore() : configStore;
+  
   // Set API URL globally
   if (typeof window !== 'undefined') {
     window.__API_BASE_URL__ = apiUrl;
   }
-
+  
+  // Computed values - works with both stores
+  const visibleGroups = $derived((useSessionApi ? store.groups : store.groups)?.filter(g => g.is_active !== false) || []);
+  const isComplete = $derived(store.isValid && store.selectedCount > 0);
+  const sessionInfo = $derived(useSessionApi ? {
+    status: store.sessionStatus,
+    timeRemaining: store.sessionTimeRemaining,
+    sessionId: store.sessionId
+  } : null);
+  
   onMount(async () => {
-    // Initialize store
-    await configStore.initialize();
-
-    // Set model ID
-    configStore.setModelId(modelId);
-
-    // Load existing configuration if provided
-    if (configurationId) {
-      await configStore.loadConfiguration(configurationId);
+    if (useSessionApi) {
+      // Initialize session-based store
+      await store.initialize(modelId, {
+        apiUrl: apiUrl.replace('/v1', '/v2'),
+        authToken: localStorage.getItem('auth_token')
+      });
+    } else {
+      // Initialize regular store
+      await store.initialize();
+      store.setModelId(modelId);
+      
+      if (configurationId) {
+        await store.loadConfiguration(configurationId);
+      }
     }
-
+    
     mounted = true;
-
-    // Set theme
     document.documentElement.setAttribute('data-theme', theme);
   });
-
-  // Watch for configuration changes
-  $effect(() => {
-    if (mounted && configStore.configuration && onConfigurationChange) {
-      onConfigurationChange(configStore.exportConfiguration());
-    }
-  });
-
-  // Watch for errors
-  $effect(() => {
-    if (configStore.error && onError) {
-      onError(configStore.error);
-    }
-  });
-
+  
   async function handleSave() {
-    if (configStore.isSaving) return;
-
-    const saved = await configStore.saveConfiguration();
-    if (saved) {
+    if (store.isSaving) return;
+    
+    if (useSessionApi) {
+      // Complete session for session-based API
+      await store.completeSession();
       if (onComplete) {
-        onComplete(configStore.exportConfiguration());
+        onComplete({
+          sessionId: store.sessionId,
+          selections: store.selections,
+          totalPrice: store.totalPrice,
+          isValid: store.isValid
+        });
       }
-      dispatch('complete', configStore.exportConfiguration());
+    } else {
+      // Save configuration for regular API
+      const saved = await store.saveConfiguration();
+      if (saved && onComplete) {
+        onComplete(store.exportConfiguration());
+      }
     }
   }
-
+  
+  async function handleExtendSession() {
+    if (useSessionApi && store.extendSession) {
+      await store.extendSession(30);
+    }
+  }
+  
   function retry() {
-    configStore.error = null;
-    configStore.loadModel();
+    store.error = null;
+    if (useSessionApi) {
+      store.initialize(modelId, {
+        apiUrl: apiUrl.replace('/v1', '/v2'),
+        authToken: localStorage.getItem('auth_token')
+      });
+    } else {
+      store.loadModel();
+    }
   }
 </script>
 
-<div class="configurator-app" class:embed-mode={embedMode}>
+<div class="configurator-app" class:embed-mode={embedMode} data-theme={theme}>
   <ErrorBoundary>
     {#if !mounted}
-      <div class="loading-container">
-        <LoadingSpinner size="large" message="Initializing configurator..." />
+      <div class="loading-state">
+        <LoadingSpinner size="large" />
+        <p>Initializing configurator...</p>
       </div>
-    {:else if configStore.error}
-      <div class="error-container">
-        <div class="error-content">
-          <div class="error-icon">⚠️</div>
-          <h2>Configuration Error</h2>
-          <p>{configStore.error.message || 'Failed to load configuration'}</p>
-          <button class="retry-button" onclick={retry}>
-            Try Again
-          </button>
-        </div>
+    {:else if store.error}
+      <div class="error-state">
+        <h2>Unable to Load Configuration</h2>
+        <p>{store.error.message || 'Something went wrong'}</p>
+        <button class="btn-retry" onclick={retry}>Try Again</button>
       </div>
-    {:else if configStore.isLoading}
-      <div class="loading-container">
-        <LoadingSpinner size="large" message="Loading model..." />
+    {:else if store.isLoading}
+      <div class="loading-state">
+        <LoadingSpinner size="large" />
+        <p>Loading configuration options...</p>
       </div>
-    {:else if !configStore.model}
-      <div class="error-container">
-        <div class="error-content">
-          <h2>Model Not Found</h2>
-          <p>The requested model could not be loaded.</p>
-        </div>
+    {:else if !store.model}
+      <div class="error-state">
+        <h2>Model Not Found</h2>
+        <p>The requested configuration model could not be loaded.</p>
       </div>
     {:else}
-      <div class="configurator-container">
+      <div class="configurator-layout">
         <!-- Header -->
-        <div class="header-card">
-          <h2 class="model-title">{configStore.model.name}</h2>
-          {#if configStore.model.description}
-            <p class="model-description">{configStore.model.description}</p>
+        <header class="configurator-header">
+          <div class="header-content">
+            <h1>{store.model.name}</h1>
+            {#if store.model.description}
+              <p class="model-description">{store.model.description}</p>
+            {/if}
+          </div>
+          
+          {#if sessionInfo}
+            <div class="session-info">
+              <span class="session-status {sessionInfo.status}">{sessionInfo.status}</span>
+              {#if sessionInfo.timeRemaining}
+                <span class="session-expiry">Expires in: {sessionInfo.timeRemaining}</span>
+                {#if sessionInfo.timeRemaining === '1 days' || sessionInfo.timeRemaining.includes('hours')}
+                  <button class="extend-btn" onclick={handleExtendSession}>Extend</button>
+                {/if}
+              {/if}
+            </div>
           {/if}
-        </div>
-
-        <div class="main-grid">
+          
+          {#if visibleGroups.length > 0}
+            <ProgressIndicator 
+              totalGroups={visibleGroups.length} 
+              completedGroups={visibleGroups.filter(g => {
+                const groupOptions = store.options?.filter(o => o.group_id === g.id) || [];
+                return groupOptions.some(o => store.selections?.[o.id]);
+              }).length}
+            />
+          {/if}
+        </header>
+        
+        <div class="configurator-body">
           <!-- Left Column: Option Groups -->
           <div class="options-column">
-            <div class="card">
-              <h3 class="section-title">Configuration Options</h3>
-              
-              {#if configStore.isValidating}
-                <div class="validating-indicator">
-                  <LoadingSpinner size="small" /> Checking constraints...
-                </div>
-              {/if}
-
-              {#if Array.isArray(configStore.groups) && configStore.groups.length > 0}
-                <div class="groups-container">
-                  {#each configStore.groups.filter(g => g.is_active !== false) as group (group.id)}
-                    {@const groupOptions = Array.isArray(configStore.options)
-                            ? configStore.options.filter(o => o.group_id === group.id && o.is_active !== false)
-                            : []}
-                    <OptionGroup
-                            {group}
-                            options={groupOptions}
-                            selections={configStore.selections || {}}
-                            availableOptions={configStore.availableOptions || []}
-                            onSelectionChange={(optionId, value) => configStore.updateSelection(optionId, value)}
-                    />
-                  {/each}
-                </div>
-              {:else}
-                <div class="empty-state">
-                  <p>No option groups available for this model.</p>
-                </div>
-              {/if}
-            </div>
+            <h2 class="column-title">Configuration Options</h2>
+            
+            {#if visibleGroups.length === 0}
+              <p class="empty-state">No configuration groups available.</p>
+            {:else}
+              {#each visibleGroups as group (group.id)}
+                <OptionGroup
+                  {group}
+                  options={store.options?.filter(o => 
+                    o.group_id === group.id && o.is_active !== false
+                  ) || []}
+                  selections={store.selections || {}}
+                  availableOptions={store.availableOptions || []}
+                  validationResults={useSessionApi ? store.validationResult : store.validationResults}
+                  onSelectionChange={(optionId, value) => 
+                    store.updateSelection(optionId, value)
+                  }
+                />
+              {/each}
+            {/if}
           </div>
-
-          <!-- Middle Column: Validation Results -->
-          <div class="validation-column">
-            <div class="card">
-              <h3 class="section-title">Constraint Validation</h3>
+          
+          <!-- Right Column: Constraints, Summary & Pricing -->
+          <div class="info-column">
+            <!-- Validation Display -->
+            <div class="info-section">
               <ValidationDisplay
-                      validationResults={configStore.validationResults}
-                      model={configStore.model}
+                validationResults={useSessionApi ? store.validationResult : store.validationResults}
+                model={store.model}
               />
             </div>
-          </div>
-
-          <!-- Right Column: Pricing & Actions -->
-          <div class="pricing-column">
-            <div class="card">
-              <h3 class="section-title">Configuration Summary</h3>
+            
+            <!-- Summary & Pricing -->
+            <div class="info-section">
+              <h3>Selected Items & Pricing</h3>
               
               <PricingDisplay
-                      pricing={configStore.pricingData}
-                      isCalculating={configStore.isPricing}
-                      selections={configStore.selections || {}}
-                      options={configStore.options || []}
+                pricing={useSessionApi ? store.pricingResult : store.pricingData}
+                isCalculating={store.isPricing || false}
+                selections={store.selections || {}}
+                options={store.options || []}
               />
-
-              <div class="actions-container">
+              
+              <!-- Actions -->
+              <div class="actions-section">
                 <button
-                        class="save-button"
-                        onclick={handleSave}
-                        disabled={configStore.isSaving || !configStore.isValid || configStore.selectedCount === 0}
-                        class:saving={configStore.isSaving}
+                  class="btn-primary"
+                  onclick={handleSave}
+                  disabled={!isComplete || store.isSaving || (useSessionApi && sessionInfo?.status === 'completed')}
                 >
-                  {#if configStore.isSaving}
-                    <LoadingSpinner size="small" /> Saving...
+                  {#if store.isSaving}
+                    <LoadingSpinner size="small" />
+                    <span>Saving...</span>
                   {:else}
-                    Save Configuration
+                    <span>{useSessionApi ? 'Complete Configuration' : 'Save Configuration'}</span>
                   {/if}
                 </button>
-
-                {#if configStore.isDirty}
-                  <div class="unsaved-indicator">
-                    <span class="unsaved-dot"></span>
-                    Unsaved changes
-                  </div>
+                
+                {#if store.selectedCount > 0}
+                  <button 
+                    class="btn-secondary"
+                    onclick={() => useSessionApi ? store.reset() : store.clearSelections()}
+                  >
+                    Clear All
+                  </button>
                 {/if}
-
-                {#if configStore.lastSaved}
-                  <div class="saved-info">
-                    Last saved: {new Date(configStore.lastSaved).toLocaleTimeString()}
-                  </div>
+                
+                {#if !isComplete && store.selectedCount > 0}
+                  <p class="help-text">Resolve validation errors to continue</p>
                 {/if}
               </div>
             </div>
@@ -213,225 +245,266 @@
 
 <style>
   .configurator-app {
+    --primary-color: #3b82f6;
+    --primary-hover: #2563eb;
+    --success-color: #10b981;
+    --error-color: #ef4444;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f9fafb;
+    --border-color: #e5e7eb;
+    
     min-height: 100vh;
-    background-color: #f3f4f6;
-    padding: 24px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-
+  
   .configurator-app.embed-mode {
     min-height: auto;
-    padding: 0;
-    background-color: white;
+    background-color: var(--bg-primary);
   }
-
-  .loading-container,
-  .error-container {
+  
+  /* Loading & Error States */
+  .loading-state,
+  .error-state {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: 400px;
-    padding: 40px;
-  }
-
-  .error-content {
+    padding: 2rem;
     text-align: center;
-    max-width: 400px;
+    gap: 1rem;
   }
-
-  .error-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
+  
+  .error-state h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0;
   }
-
-  .error-content h2 {
-    margin: 0 0 8px 0;
-    font-size: 24px;
-    color: #111827;
+  
+  .error-state p {
+    color: var(--text-secondary);
+    margin: 0.5rem 0 1.5rem;
   }
-
-  .error-content p {
-    margin: 0 0 24px 0;
-    color: #6b7280;
-  }
-
-  .retry-button {
-    background-color: #3b82f6;
+  
+  .btn-retry {
+    padding: 0.5rem 1rem;
+    background-color: var(--primary-color);
     color: white;
     border: none;
-    padding: 12px 24px;
-    border-radius: 6px;
-    font-size: 16px;
+    border-radius: 4px;
+    font-size: 0.875rem;
     cursor: pointer;
-    transition: background-color 0.2s;
   }
-
-  .retry-button:hover {
-    background-color: #2563eb;
+  
+  .btn-retry:hover {
+    background-color: var(--primary-hover);
   }
-
-  .configurator-container {
+  
+  /* Layout */
+  .configurator-layout {
     max-width: 1400px;
     margin: 0 auto;
+    padding: 1rem;
   }
-
-  .header-card {
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: 24px;
-    margin-bottom: 24px;
+  
+  /* Header */
+  .configurator-header {
+    margin-bottom: 1.5rem;
   }
-
-  .model-title {
-    margin: 0 0 8px 0;
-    font-size: 32px;
+  
+  .header-content {
+    margin-bottom: 1rem;
+  }
+  
+  .configurator-header h1 {
+    font-size: 1.875rem;
     font-weight: 700;
-    color: #111827;
+    margin: 0 0 0.5rem;
   }
-
+  
   .model-description {
+    font-size: 1rem;
+    color: var(--text-secondary);
     margin: 0;
-    font-size: 16px;
-    color: #6b7280;
   }
-
-  .main-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 24px;
-  }
-
-  .card {
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: 24px;
-  }
-
-  .section-title {
-    margin: 0 0 16px 0;
-    font-size: 18px;
-    font-weight: 600;
-    color: #111827;
-  }
-
-  .validating-indicator {
+  
+  /* Session Info */
+  .session-info {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+  }
+  
+  .session-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-weight: 500;
+    text-transform: capitalize;
+  }
+  
+  .session-status.draft {
     background: #fef3c7;
-    border-radius: 6px;
-    font-size: 14px;
     color: #92400e;
-    margin-bottom: 16px;
   }
-
-  .groups-container {
-    display: flex;
-    flex-direction: column;
+  
+  .session-status.validated {
+    background: #d1fae5;
+    color: #065f46;
   }
-
-  .empty-state {
-    text-align: center;
-    padding: 32px;
-    color: #6b7280;
+  
+  .session-status.completed {
+    background: #dbeafe;
+    color: #1e40af;
   }
-
-  .actions-container {
-    margin-top: 24px;
-    padding-top: 24px;
-    border-top: 1px solid #e5e7eb;
+  
+  .session-expiry {
+    color: var(--text-secondary);
   }
-
-  .save-button {
-    width: 100%;
-    background-color: #3b82f6;
+  
+  .extend-btn {
+    padding: 0.25rem 0.75rem;
+    background: var(--primary-color);
     color: white;
     border: none;
-    padding: 12px 24px;
-    border-radius: 6px;
-    font-size: 16px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  
+  .extend-btn:hover {
+    background: var(--primary-hover);
+  }
+  
+  /* Two Column Layout */
+  .configurator-body {
+    display: grid;
+    grid-template-columns: 1fr 500px;
+    gap: 1.5rem;
+    align-items: start;
+  }
+  
+  /* Options Column */
+  .options-column {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+  }
+  
+  .column-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+  }
+  
+  .empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 2rem;
+  }
+  
+  /* Info Column */
+  .info-column {
+    position: sticky;
+    top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .info-section {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+  }
+  
+  .info-section h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 1rem;
+  }
+  
+  /* Actions */
+  .actions-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+  }
+  
+  .btn-primary,
+  .btn-secondary {
+    padding: 0.75rem 1rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 0.5rem;
   }
-
-  .save-button:hover:not(:disabled) {
-    background-color: #2563eb;
+  
+  .btn-primary {
+    background-color: var(--primary-color);
+    color: white;
   }
-
-  .save-button:disabled {
-    background-color: #9ca3af;
+  
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--primary-hover);
+  }
+  
+  .btn-primary:disabled {
+    opacity: 0.6;
     cursor: not-allowed;
   }
-
-  .save-button.saving {
-    background-color: #6b7280;
+  
+  .btn-secondary {
+    background-color: white;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
   }
-
-  .unsaved-indicator {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 12px;
-    font-size: 14px;
-    color: #f59e0b;
+  
+  .btn-secondary:hover {
+    background-color: var(--bg-secondary);
   }
-
-  .unsaved-dot {
-    width: 8px;
-    height: 8px;
-    background-color: #f59e0b;
-    border-radius: 50%;
-    animation: pulse 2s infinite;
-  }
-
-  .saved-info {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #6b7280;
+  
+  .help-text {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--error-color);
     text-align: center;
   }
-
-  @keyframes pulse {
-    0% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
-    100% {
-      opacity: 1;
-    }
-  }
-
-  /* Responsive layout */
+  
+  /* Responsive */
   @media (max-width: 1024px) {
-    .main-grid {
+    .configurator-body {
       grid-template-columns: 1fr;
     }
+    
+    .info-column {
+      position: static;
+    }
   }
-
+  
   @media (max-width: 640px) {
-    .configurator-app {
-      padding: 16px;
+    .configurator-layout {
+      padding: 0.5rem;
     }
-
-    .header-card {
-      padding: 16px;
-    }
-
-    .card {
-      padding: 16px;
-    }
-
-    .model-title {
-      font-size: 24px;
+    
+    .options-column,
+    .info-section {
+      padding: 1rem;
     }
   }
 </style>

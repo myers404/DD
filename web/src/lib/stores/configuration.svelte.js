@@ -256,13 +256,30 @@ class ConfigurationStore {
     if (!group) return;
 
     // For single selection groups, clear other selections in the group
-    if (group.selection_type === 'single' && newQuantity > 0) {
+    const isSingleSelect = group.selection_type === 'single' || 
+                          group.selection_type === 'single-select' || 
+                          group.type === 'single-select' ||
+                          group.type === 'single';
+    
+    if (isSingleSelect && newQuantity > 0) {
       const groupOptions = this.options.filter(o => o.group_id === group.id);
       groupOptions.forEach(opt => {
         if (opt.id !== optionId && this.selections[opt.id]) {
           delete this.selections[opt.id];
         }
       });
+    } else if (!isSingleSelect && newQuantity > 0) {
+      // For multi-select groups, check max selections constraint
+      if (group.max_selections) {
+        const currentGroupSelections = this.options
+          .filter(o => o.group_id === group.id && this.selections[o.id] && o.id !== optionId)
+          .length;
+        
+        if (currentGroupSelections >= group.max_selections) {
+          console.warn(`Cannot select more than ${group.max_selections} options in group ${group.name}`);
+          return; // Don't allow the selection
+        }
+      }
     }
 
     if (newQuantity === 0) {
@@ -295,18 +312,18 @@ class ConfigurationStore {
         this.configuration = result.configuration;
       }
 
-      // Check for validation data in different possible locations
-      const validation = result.validation || result.validation_result;
-      if (validation) {
-        // Handle nested validation structure
-        const validationData = validation.result || validation;
-        this.validationResults = validationData;
-        this.validationErrors = validationData.violations || [];
+      // The backend returns validation_result directly in the ConfigurationUpdate response
+      if (result.validation_result) {
+        this.validationResults = result.validation_result;
+        this.validationErrors = result.validation_result.violations || [];
       }
 
       if (result.available_options) {
         // Backend returns AvailableOption objects with is_selectable flag
         this.availableOptions = result.available_options;
+        
+        // Check and deselect any options that are no longer valid
+        this.checkAndDeselectInvalidOptions(result.available_options);
         
         // Check for required options and auto-select them
         this.checkAndApplyRequiredOptions(result.available_options);
@@ -443,6 +460,32 @@ class ConfigurationStore {
     return availableOption && !availableOption.is_selectable ? availableOption.reason : null;
   }
 
+  // Check and deselect options that are no longer valid based on constraints
+  checkAndDeselectInvalidOptions(availableOptions) {
+    let anyDeselected = false;
+    
+    if (Array.isArray(availableOptions)) {
+      for (const availableOption of availableOptions) {
+        const option = availableOption.option || availableOption;
+        const optionId = option.id;
+        
+        // If option is currently selected but no longer selectable, deselect it
+        if (this.selections[optionId] && availableOption.is_selectable === false) {
+          delete this.selections[optionId];
+          anyDeselected = true;
+          console.log(`Auto-deselected invalid option: ${option.name} (${optionId}) - Reason: ${availableOption.reason || 'Constraint violation'}`);
+        }
+      }
+    }
+    
+    // If we deselected anything, mark as dirty to trigger updates
+    if (anyDeselected) {
+      this.isDirty = true;
+    }
+    
+    return anyDeselected;
+  }
+
   // Check for and automatically apply required options based on constraints
   checkAndApplyRequiredOptions(availableOptions) {
     let autoSelected = false;
@@ -563,6 +606,20 @@ class ConfigurationStore {
   isOptionVisible(optionId) {
     if (!this.hiddenOptions) return true;
     return !this.hiddenOptions.has(optionId);
+  }
+
+  // Clear all selections
+  clearSelections() {
+    this.selections = {};
+    this.isDirty = true;
+    this.validationResults = null;
+    this.pricingData = null;
+    
+    // Trigger validation and pricing updates
+    if (this.configurationId) {
+      this.validateConfiguration();
+      this.calculatePricing();
+    }
   }
 
   // Reset store

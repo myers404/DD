@@ -58,12 +58,15 @@ func DefaultServerConfig() *ServerConfig {
 
 // Server represents the HTTP server
 type Server struct {
-	router      *mux.Router
-	server      *http.Server
-	config      *ServerConfig
-	cpqService  CPQServiceInterface
-	authService AuthService
-	startTime   time.Time
+	router         *mux.Router
+	server         *http.Server
+	config         *ServerConfig
+	cpqService     CPQServiceInterface
+	cpqServiceV2   *CPQServiceV2      // Enhanced CPQ service with repositories
+	sessionService *SessionService    // Session-based service
+	sessionStore   SessionStore       // Session persistence
+	authService    AuthService
+	startTime      time.Time
 }
 
 // NewServer creates a new server instance with optional authentication
@@ -98,6 +101,60 @@ func NewServer(config *ServerConfig, cpqService CPQServiceInterface, authService
 	s.setupRoutes()
 
 	return s, nil
+}
+
+// setupConfigurationRoutesV2 sets up session-based configuration routes
+func (s *Server) setupConfigurationRoutesV2(router *mux.Router) {
+	if s.sessionService == nil {
+		log.Printf("⚠️  Session service not available, skipping v2 routes")
+		return
+	}
+	
+	handlers := NewConfigurationHandlersV2(s.sessionService)
+	
+	// Session-based configuration operations
+	router.HandleFunc("", handlers.CreateConfiguration).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.GetConfiguration).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}", handlers.UpdateConfiguration).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}/selections", handlers.AddSelections).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/validate", handlers.ValidateConfiguration).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/price", handlers.CalculatePrice).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/extend", handlers.ExtendSession).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/complete", handlers.CompleteSession).Methods("POST", "OPTIONS")
+	
+	// User session management
+	router.HandleFunc("/user-sessions", handlers.GetUserSessions).Methods("GET", "OPTIONS")
+	
+	// System stats (admin only)
+	router.HandleFunc("/stats", handlers.GetSystemStats).Methods("GET", "OPTIONS")
+	
+	log.Printf("✅ V2 configuration routes configured")
+}
+
+// EnableSessionSupport adds session-based configuration support
+func (s *Server) EnableSessionSupport(sessionStore SessionStore, cpqServiceV2 *CPQServiceV2) error {
+	if sessionStore == nil {
+		return fmt.Errorf("session store is required")
+	}
+	
+	if cpqServiceV2 == nil {
+		return fmt.Errorf("CPQ service v2 is required")
+	}
+	
+	s.sessionStore = sessionStore
+	s.cpqServiceV2 = cpqServiceV2
+	
+	// Create session service
+	s.sessionService = NewSessionService(sessionStore, cpqServiceV2)
+	
+	// Re-setup routes to include v2 endpoints
+	s.setupRoutes()
+	
+	// Start cleanup worker
+	s.sessionService.StartCleanupWorker()
+	
+	log.Printf("✅ Session support enabled")
+	return nil
 }
 
 // setupMiddleware configures server middleware
@@ -136,6 +193,7 @@ func (s *Server) setupMiddleware() {
 
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
+	// V1 API Routes
 	api := s.router.PathPrefix("/api/v1").Subrouter()
 
 	// Health and system endpoints (always public)
@@ -159,6 +217,34 @@ func (s *Server) setupRoutes() {
 	// Pricing routes
 	pricingRouter := api.PathPrefix("/pricing").Subrouter()
 	s.setupPricingRoutes(pricingRouter)
+
+	// V2 API Routes (Session-based)
+	if s.sessionService != nil {
+		apiV2 := s.router.PathPrefix("/api/v2").Subrouter()
+		
+		// Health endpoints for v2
+		apiV2.HandleFunc("/health", s.healthHandler).Methods("GET", "OPTIONS")
+		apiV2.HandleFunc("/status", s.statusHandler).Methods("GET", "OPTIONS")
+		
+		// Authentication endpoints (shared with v1)
+		if s.authService != nil {
+			s.setupAuthRoutes(apiV2)
+		}
+		
+		// Session-based configuration routes
+		configRouterV2 := apiV2.PathPrefix("/configurations").Subrouter()
+		s.setupConfigurationRoutesV2(configRouterV2)
+		
+		// Model routes (same as v1)
+		modelRouterV2 := apiV2.PathPrefix("/models").Subrouter()
+		s.setupModelRoutes(modelRouterV2)
+		
+		// Add session-based configuration listing under models
+		configHandlersV2 := NewConfigurationHandlersV2(s.sessionService)
+		modelRouterV2.HandleFunc("/{modelId}/configurations", configHandlersV2.GetModelConfigurations).Methods("GET", "OPTIONS")
+		
+		log.Printf("✅ V2 Session-based API routes configured")
+	}
 }
 
 // setupAuthRoutes configures authentication routes

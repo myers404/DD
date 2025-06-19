@@ -1,5 +1,5 @@
 <!-- web/src/lib/components/OptionCard.svelte -->
-<!-- Simplified design matching ConstraintTester style -->
+<!-- Simplified option card with basic HTML controls -->
 <script>
   let {
     option,
@@ -13,55 +13,63 @@
     onChange
   } = $props();
 
-  function handleChange() {
+  function handleChange(event) {
     if (!disabled && available) {
-      // Don't allow deselecting required options
-      if (selected && isRequired) {
-        return;
+      // For radio buttons, always send 1 when selected (can't deselect radio buttons)
+      if (selectionType === 'single') {
+        onChange(1);
+      } else {
+        // For checkboxes, toggle between 0 and 1
+        // Don't allow deselecting required options
+        if (selected && isRequired) {
+          event.preventDefault();
+          return;
+        }
+        onChange(selected ? 0 : 1);
       }
-      onChange(selected ? 0 : 1);
     }
   }
 </script>
 
-<label class="option-label" class:disabled={disabled || !available}>
-  <input
-    type={selectionType === 'single' ? 'radio' : 'checkbox'}
-    name={selectionType === 'single' && groupName ? groupName : undefined}
-    checked={selected}
-    disabled={disabled || !available}
-    onchange={handleChange}
-    class="option-input"
-  />
-  <span class="option-text">
-    {option.name}
-    {#if option.price && option.price > 0}
-      <span class="price">(+${option.price.toFixed(2)})</span>
-    {/if}
-    {#if isRequired}
-      <span class="required">*</span>
-    {/if}
-  </span>
-</label>
-
-{#if !available && (unavailableReason || option.unavailable_reason)}
-  <div class="unavailable-reason">
-    {unavailableReason || option.unavailable_reason}
-  </div>
-{/if}
+<div class="option-item" class:unavailable={!available && !selected}>
+  <label class="option-label" class:disabled={disabled || !available}>
+    <input
+      type={selectionType === 'single' ? 'radio' : 'checkbox'}
+      name={selectionType === 'single' && groupName ? groupName : undefined}
+      checked={selected}
+      disabled={disabled || !available}
+      onchange={handleChange}
+      class="option-input"
+    />
+    <span class="option-text">
+      {option.name}
+      {#if option.base_price && option.base_price > 0}
+        <span class="price">(+${option.base_price.toFixed(2)})</span>
+      {/if}
+      {#if isRequired}
+        <span class="badge-required">[Required]</span>
+      {/if}
+    </span>
+  </label>
+  
+  {#if ((!available || disabled) && unavailableReason && !selected)}
+    <div class="constraint-reason">
+      {unavailableReason}
+    </div>
+  {/if}
+</div>
 
 <style>
+  .option-item {
+    margin: 0;
+  }
+  
   .option-label {
     display: flex;
     align-items: center;
-    padding: 8px 0;
     cursor: pointer;
-    font-size: 14px;
-    color: #374151;
-  }
-
-  .option-label:hover:not(.disabled) {
-    color: #111827;
+    padding: 0.125rem 0;
+    gap: 0.375rem;
   }
 
   .option-label.disabled {
@@ -70,43 +78,43 @@
   }
 
   .option-input {
-    width: 16px;
-    height: 16px;
-    margin-right: 8px;
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
     cursor: pointer;
-  }
-
-  .option-input:focus {
-    outline: 2px solid #3b82f6;
-    outline-offset: 2px;
   }
 
   .option-input:disabled {
     cursor: not-allowed;
   }
-
+  
   .option-text {
-    flex: 1;
-    line-height: 1.5;
+    font-size: 0.875rem;
+    color: var(--text-primary, #111827);
   }
-
+  
   .price {
-    color: #059669;
+    color: var(--primary-color, #3b82f6);
     font-weight: 500;
-    margin-left: 4px;
+    margin-left: 0.25rem;
   }
-
-  .required {
-    color: #ef4444;
-    font-weight: 600;
-    margin-left: 2px;
+  
+  .badge-required {
+    color: var(--error-color, #ef4444);
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: 0.5rem;
   }
-
-  .unavailable-reason {
-    margin-left: 24px;
-    margin-top: 4px;
-    font-size: 12px;
-    color: #ef4444;
-    line-height: 1.4;
+  
+  .constraint-reason {
+    margin-left: 1.375rem;
+    padding: 0.125rem 0 0.25rem 0;
+    font-size: 0.75rem;
+    color: var(--text-secondary, #6b7280);
+    font-style: italic;
+  }
+  
+  .option-item.unavailable .constraint-reason {
+    color: #dc2626;
   }
 </style>

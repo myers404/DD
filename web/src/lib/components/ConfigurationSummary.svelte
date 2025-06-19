@@ -1,216 +1,199 @@
 <!-- web/src/lib/components/ConfigurationSummary.svelte -->
+<!-- Configuration summary display component -->
 <script>
+    import { sanitizeText } from '../utils/sanitizer.js';
+    
     let {
-        configuration,
-        model,
-        onEdit
+        selections = {},
+        options = [],
+        groups = [],
+        compact = false,
+        configuration = null,
+        model = null,
+        onEdit = null
     } = $props();
 
-    function formatDate(date) {
-        if (!date) return 'N/A';
-        return new Date(date).toLocaleString();
-    }
-
-    function formatPrice(amount) {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD'
-        }).format(amount || 0);
-    }
-
-    // Group selections by group
-    let groupedSelections = $derived(() => {
-        const groups = new Map();
-
-        if (Array.isArray(configuration?.selections)) {
-            configuration.selections.forEach(sel => {
-                const groupName = sel.group_name || 'Other Options';
-                if (!groups.has(groupName)) {
-                    groups.set(groupName, []);
-                }
-                groups.get(groupName).push(sel);
-            });
+    // Get selected options with their details
+    const selectedOptions = $derived(options
+        .filter(option => selections[option.id] > 0)
+        .map(option => ({
+            ...option,
+            quantity: selections[option.id],
+            group: groups.find(g => g.id === option.group_id)
+        }))
+        .sort((a, b) => (a.group_id || '').localeCompare(b.group_id || '')));
+    
+    // Calculate total price
+    const totalPrice = $derived(selectedOptions.reduce((sum, option) => 
+        sum + (option.base_price || 0) * option.quantity, 0
+    ));
+    
+    // Group selected options by group
+    const groupedSelections = $derived(selectedOptions.reduce((grouped, option) => {
+        const groupName = option.group?.name || 'Other Options';
+        if (!grouped[groupName]) {
+            grouped[groupName] = [];
         }
-
-        return Array.from(groups.entries());
-    });
+        grouped[groupName].push(option);
+        return grouped;
+    }, {}));
 </script>
 
-<div class="configuration-summary">
-    <!-- Header -->
-    <div class="summary-header">
-        <div class="header-info">
-            <h3>Configuration Summary</h3>
-            <p class="config-id">ID: {configuration?.id || 'Not saved'}</p>
+<div class="configuration-summary" class:compact>
+    {#if selectedOptions.length === 0}
+        <p class="empty-state">No options selected yet</p>
+    {:else if compact}
+        <!-- Compact view for sidebar -->
+        <div class="compact-list">
+            {#each selectedOptions as option}
+                <div class="summary-item">
+                    <span class="item-name">{sanitizeText(option.name)}</span>
+                    {#if option.base_price > 0}
+                        <span class="item-price">+${option.base_price.toFixed(2)}</span>
+                    {/if}
+                </div>
+            {/each}
         </div>
-
-        <div class="header-status">
-            {#if configuration?.validation?.is_valid}
-                <span class="status-badge valid">✅ Valid</span>
-            {:else}
-                <span class="status-badge invalid">⚠️ Issues</span>
+        
+        <div class="summary-total">
+            <span>Total:</span>
+            <span class="total-price">${totalPrice.toFixed(2)}</span>
+        </div>
+    {:else}
+        <!-- Full view for detailed summary -->
+        <div class="full-summary">
+            {#if configuration}
+                <!-- Configuration header -->
+                <div class="summary-header">
+                    <div class="header-info">
+                        <h3>Configuration Summary</h3>
+                        <p class="config-id">ID: {configuration.id || 'Not saved'}</p>
+                    </div>
+                    
+                    <div class="header-status">
+                        {#if configuration.validation?.is_valid}
+                            <span class="status-badge valid">✅ Valid</span>
+                        {:else}
+                            <span class="status-badge invalid">⚠️ Issues</span>
+                        {/if}
+                    </div>
+                </div>
             {/if}
-        </div>
-    </div>
-
-    <!-- Model Information -->
-    <div class="summary-section">
-        <h4 class="section-title">Product Model</h4>
-        <div class="info-grid">
-            <div class="info-item">
-                <span class="label">Model</span>
-                <span class="value">{configuration?.model_name || model?.name || 'Unknown'}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">Created</span>
-                <span class="value">{formatDate(configuration?.metadata?.created)}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">Last Updated</span>
-                <span class="value">{formatDate(configuration?.metadata?.updated)}</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Selected Options -->
-    <div class="summary-section">
-        <div class="section-header">
-            <h4 class="section-title">Selected Options ({configuration?.selections?.length || 0})</h4>
-            {#if onEdit}
-                <button class="edit-btn" onclick={() => onEdit(0)}>
-                    Edit Selections
-                </button>
-            {/if}
-        </div>
-
-        {#if groupedSelections.length > 0}
-            <div class="selections-list">
-                {#each groupedSelections as [groupName, selections]}
-                    <div class="selection-group">
+            
+            <!-- Selected options by group -->
+            <div class="selections-section">
+                <h4 class="section-title">Selected Options ({selectedOptions.length})</h4>
+                
+                {#each Object.entries(groupedSelections) as [groupName, groupOptions]}
+                    <div class="group-section">
                         <h5 class="group-name">{groupName}</h5>
-                        <div class="group-items">
-                            {#each selections as selection}
-                                <div class="selection-item">
-                                    <div class="item-info">
-                                        <span class="item-name">{selection.option_name}</span>
-                                        {#if selection.quantity > 1}
-                                            <span class="item-quantity">×{selection.quantity}</span>
-                                        {/if}
-                                    </div>
-                                    <span class="item-price">{formatPrice(selection.total_price)}</span>
+                        {#each groupOptions as option}
+                            <div class="option-row">
+                                <div class="option-details">
+                                    <span class="option-name">{sanitizeText(option.name)}</span>
+                                    {#if option.sku}
+                                        <span class="option-sku">SKU: {option.sku}</span>
+                                    {/if}
                                 </div>
-                            {/each}
-                        </div>
+                                <div class="option-pricing">
+                                    {#if option.quantity > 1}
+                                        <span class="quantity">{option.quantity}x</span>
+                                    {/if}
+                                    {#if option.base_price > 0}
+                                        <span class="price">${(option.base_price * option.quantity).toFixed(2)}</span>
+                                    {:else}
+                                        <span class="included">Included</span>
+                                    {/if}
+                                </div>
+                            </div>
+                        {/each}
                     </div>
                 {/each}
             </div>
-        {:else}
-            <p class="empty-message">No options selected</p>
-        {/if}
-    </div>
-
-    <!-- Validation Summary -->
-    {#if configuration?.validation?.violations?.length > 0}
-        <div class="summary-section">
-            <div class="section-header">
-                <h4 class="section-title validation-title">
-                    Validation Issues ({configuration.validation.violations.length})
-                </h4>
-                {#if onEdit}
-                    <button class="edit-btn" onclick={() => onEdit(1)}>
-                        Review Issues
-                    </button>
-                {/if}
-            </div>
-
-            <div class="violations-summary">
-                {#each configuration.validation.violations.slice(0, 3) as violation}
-                    <div class="violation-summary">
-            <span class="violation-icon">
-              {violation.severity === 'critical' ? '🚫' : '⚠️'}
-            </span>
-                        <span class="violation-text">{violation.message}</span>
-                    </div>
-                {/each}
-                {#if configuration.validation.violations.length > 3}
-                    <p class="more-violations">
-                        +{configuration.validation.violations.length - 3} more issues
-                    </p>
-                {/if}
+            
+            <!-- Total -->
+            <div class="summary-footer">
+                <div class="total-row">
+                    <span class="total-label">Configuration Total</span>
+                    <span class="total-amount">${totalPrice.toFixed(2)}</span>
+                </div>
             </div>
         </div>
     {/if}
-
-    <!-- Pricing Summary -->
-    <div class="summary-section">
-        <div class="section-header">
-            <h4 class="section-title">Pricing Summary</h4>
-            {#if onEdit}
-                <button class="edit-btn" onclick={() => onEdit(2)}>
-                    View Details
-                </button>
-            {/if}
-        </div>
-
-        <div class="pricing-summary">
-            <div class="price-line">
-                <span class="label">Base Price</span>
-                <span class="value">{formatPrice(configuration?.pricing?.base_price)}</span>
-            </div>
-
-            {#if configuration?.pricing?.discounts?.length > 0}
-                <div class="price-line discount">
-                    <span class="label">Discounts Applied</span>
-                    <span class="value">
-            -{formatPrice(
-                        configuration.pricing.discounts.reduce((sum, d) => sum + d.amount, 0)
-                    )}
-          </span>
-                </div>
-            {/if}
-
-            <div class="price-line total">
-                <span class="label">Total Price</span>
-                <span class="value">{formatPrice(configuration?.pricing?.total_price)}</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Actions -->
-    <div class="summary-actions">
-        <button class="action-btn secondary" onclick={() => window.print()}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M5 3V1h6v2H5zM4 3H2.5A1.5 1.5 0 001 4.5V10h2V8h10v2h2V4.5A1.5 1.5 0 0013.5 3H12v2H4V3zm9 7h-2v4H5v-4H3v4.5A1.5 1.5 0 004.5 16h7a1.5 1.5 0 001.5-1.5V10z"/>
-            </svg>
-            Print Summary
-        </button>
-
-        <button class="action-btn secondary" onclick={() => {
-      const data = JSON.stringify(configuration, null, 2);
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `configuration-${configuration?.id || 'draft'}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2 2a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V2zm10-1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V2a1 1 0 00-1-1z"/>
-                <path d="M8 3.5a.5.5 0 01.5.5v4.793l1.146-1.147a.5.5 0 01.708.708l-2 2a.5.5 0 01-.708 0l-2-2a.5.5 0 11.708-.708L7.5 8.793V4a.5.5 0 01.5-.5z"/>
-            </svg>
-            Export Configuration
-        </button>
-    </div>
 </div>
 
 <style>
     .configuration-summary {
+        font-size: 0.875rem;
+    }
+    
+    .configuration-summary.compact {
+        background: transparent;
+    }
+    
+    .empty-state {
+        text-align: center;
+        color: var(--text-secondary, #6b7280);
+        padding: 1rem;
+        margin: 0;
+    }
+    
+    /* Compact view styles */
+    .compact-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .summary-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.375rem 0;
+        border-bottom: 1px solid var(--border-light, #f3f4f6);
+    }
+    
+    .summary-item:last-child {
+        border-bottom: none;
+    }
+    
+    .item-name {
+        color: var(--text-primary, #111827);
+        font-weight: 500;
+        flex: 1;
+        margin-right: 0.5rem;
+        font-size: 0.875rem;
+    }
+    
+    .item-price {
+        color: var(--primary-color, #3b82f6);
+        font-weight: 600;
+        white-space: nowrap;
+        font-size: 0.875rem;
+    }
+    
+    .summary-total {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 0.75rem;
+        margin-top: 0.75rem;
+        border-top: 2px solid var(--border-color, #e5e7eb);
+        font-weight: 600;
+    }
+    
+    .total-price {
+        color: var(--primary-color, #3b82f6);
+        font-size: 1rem;
+    }
+    
+    /* Full view styles */
+    .full-summary {
         background: var(--bg-primary, #ffffff);
-        border-radius: 8px;
+        border-radius: 0.5rem;
         overflow: hidden;
     }
-
+    
     .summary-header {
         display: flex;
         justify-content: space-between;
@@ -249,238 +232,111 @@
         background: var(--warning-bg, #fef3c7);
         color: var(--warning-text, #92400e);
     }
-
-    .summary-section {
+    
+    .selections-section {
         padding: 1.5rem;
-        border-bottom: 1px solid var(--border-color, #e5e7eb);
     }
-
-    .summary-section:last-of-type {
-        border-bottom: none;
-    }
-
-    .section-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
-    }
-
+    
     .section-title {
-        margin: 0;
+        margin: 0 0 1rem;
         font-size: 0.875rem;
         font-weight: 600;
         text-transform: uppercase;
+        letter-spacing: 0.05em;
         color: var(--text-secondary, #6b7280);
     }
-
-    .section-title.validation-title {
-        color: var(--warning-text, #92400e);
+    
+    .group-section {
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border-color, #e5e7eb);
+        margin-bottom: 1rem;
     }
-
-    .edit-btn {
-        padding: 0.25rem 0.75rem;
-        border: 1px solid var(--primary-color, #3b82f6);
-        background: transparent;
-        color: var(--primary-color, #3b82f6);
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
+    
+    .group-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
     }
-
-    .edit-btn:hover {
-        background: var(--primary-color, #3b82f6);
-        color: white;
-    }
-
-    .info-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-    }
-
-    .info-item {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-
-    .info-item .label {
-        font-size: 0.75rem;
-        color: var(--text-secondary, #6b7280);
-    }
-
-    .info-item .value {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--text-primary, #111827);
-    }
-
-    .selections-list {
-        display: flex;
-        flex-direction: column;
-        gap: 1.25rem;
-    }
-
-    .selection-group {
-        background: var(--bg-tertiary, #f9fafb);
-        border-radius: 6px;
-        padding: 1rem;
-    }
-
+    
     .group-name {
-        margin: 0 0 0.75rem;
         font-size: 0.875rem;
         font-weight: 600;
         color: var(--text-primary, #111827);
+        margin: 0 0 0.5rem;
     }
-
-    .group-items {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-    .selection-item {
+    
+    .option-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.5rem;
-        background: var(--bg-primary, #ffffff);
-        border-radius: 4px;
+        padding: 0.5rem 0;
     }
-
-    .item-info {
+    
+    .option-details {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+        flex: 1;
+    }
+    
+    .option-name {
+        font-weight: 500;
+        color: var(--text-primary, #111827);
+    }
+    
+    .option-sku {
+        font-size: 0.75rem;
+        color: var(--text-tertiary, #9ca3af);
+    }
+    
+    .option-pricing {
         display: flex;
         align-items: center;
         gap: 0.5rem;
     }
-
-    .item-name {
+    
+    .quantity {
         font-size: 0.875rem;
-        color: var(--text-primary, #111827);
-    }
-
-    .item-quantity {
-        font-size: 0.75rem;
         color: var(--text-secondary, #6b7280);
-        font-weight: 500;
     }
-
-    .item-price {
-        font-size: 0.875rem;
+    
+    .price {
         font-weight: 600;
         color: var(--primary-color, #3b82f6);
     }
-
-    .violations-summary {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-    .violation-summary {
-        display: flex;
-        align-items: flex-start;
-        gap: 0.5rem;
-        padding: 0.5rem;
-        background: var(--warning-bg, #fef3c7);
-        border-radius: 4px;
+    
+    .included {
         font-size: 0.875rem;
-    }
-
-    .violation-icon {
-        flex-shrink: 0;
-    }
-
-    .violation-text {
-        color: var(--warning-text, #92400e);
-    }
-
-    .more-violations {
-        margin: 0.5rem 0 0;
-        font-size: 0.75rem;
-        color: var(--text-secondary, #6b7280);
-        font-style: italic;
-    }
-
-    .pricing-summary {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-    .price-line {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 0.875rem;
-    }
-
-    .price-line.discount {
         color: var(--success-color, #10b981);
     }
-
-    .price-line.total {
-        padding-top: 0.5rem;
-        margin-top: 0.5rem;
-        border-top: 1px solid var(--border-color, #e5e7eb);
-        font-size: 1.125rem;
-        font-weight: 700;
-        color: var(--text-primary, #111827);
-    }
-
-    .empty-message {
-        text-align: center;
-        color: var(--text-secondary, #6b7280);
-        padding: 2rem;
-        font-style: italic;
-    }
-
-    .summary-actions {
-        display: flex;
-        gap: 1rem;
+    
+    .summary-footer {
         padding: 1.5rem;
         background: var(--bg-secondary, #f9fafb);
+        border-top: 1px solid var(--border-color, #e5e7eb);
     }
-
-    .action-btn {
+    
+    .total-row {
         display: flex;
+        justify-content: space-between;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 1.25rem;
-        border-radius: 6px;
-        border: 1px solid var(--border-color, #e5e7eb);
-        background: var(--bg-primary, #ffffff);
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
     }
-
-    .action-btn:hover {
-        background: var(--bg-tertiary, #f3f4f6);
+    
+    .total-label {
+        font-weight: 600;
+        color: var(--text-primary, #111827);
     }
-
+    
+    .total-amount {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--primary-color, #3b82f6);
+    }
+    
     @media (max-width: 640px) {
         .summary-header {
             flex-direction: column;
             gap: 1rem;
-        }
-
-        .info-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .summary-actions {
-            flex-direction: column;
-        }
-
-        .action-btn {
-            width: 100%;
-            justify-content: center;
         }
     }
 </style>

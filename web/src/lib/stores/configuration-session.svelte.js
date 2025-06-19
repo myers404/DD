@@ -1,0 +1,400 @@
+// web/src/lib/stores/configuration-session.svelte.js
+// Session-based configuration store using the new v2 API
+
+import SessionApiClient from '../api/session-client.js';
+
+class ConfigurationSessionStore {
+  constructor() {
+    this.modelId = $state(null);
+    this.sessionId = $state(null);
+    this.sessionToken = $state(null);
+    this.sessionStatus = $state('draft');
+    this.expiresAt = $state(null);
+    
+    this.model = $state(null);
+    this.groups = $state([]);
+    this.options = $state([]);
+    this.rules = $state([]);
+    this.selections = $state({});
+    
+    this.configuration = $state(null);
+    this.validationResult = $state(null);
+    this.pricingResult = $state(null);
+    this.availableOptions = $state([]);
+    
+    this.isLoading = $state(false);
+    this.isSaving = $state(false);
+    this.error = $state(null);
+    this.lastSaved = $state(null);
+    this.isDirty = $state(false);
+    
+    this.api = null;
+  }
+
+  // Initialization
+  async initialize(modelId, options = {}) {
+    this.modelId = modelId;
+    
+    // Create API client
+    this.api = new SessionApiClient(options.apiUrl, {
+      modelId,
+      authToken: options.authToken,
+      timeout: options.timeout || 30000
+    });
+
+    // Try to recover existing session
+    const recovered = await this.recoverSession();
+    
+    if (!recovered) {
+      // Create new session
+      await this.createSession();
+    }
+
+    // Load model data
+    await this.loadModel();
+  }
+
+  async createSession() {
+    if (!this.api || !this.modelId) return;
+
+    try {
+      this.isLoading = true;
+      
+      const result = await this.api.createSession(this.modelId);
+      
+      this.sessionId = result.session_id;
+      this.sessionToken = result.session_token;
+      this.sessionStatus = result.status;
+      this.expiresAt = result.expires_at;
+      this.configuration = result;
+      
+      console.log('Session created:', {
+        sessionId: this.sessionId,
+        status: this.sessionStatus,
+        expiresAt: this.expiresAt
+      });
+      
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      this.error = {
+        message: error.message || 'Failed to create session',
+        code: error.code || 'SESSION_CREATE_ERROR',
+        details: error
+      };
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  async recoverSession() {
+    if (!this.api) return false;
+
+    try {
+      const session = await this.api.recoverSession();
+      
+      if (session) {
+        this.sessionId = session.session_id || session.id;
+        this.sessionToken = session.session_token;
+        this.sessionStatus = session.status;
+        this.expiresAt = session.expires_at;
+        this.configuration = session;
+        this.selections = session.selections || {};
+        this.validationResult = session.validation_state;
+        this.pricingResult = session.pricing_state;
+        
+        console.log('Session recovered:', {
+          sessionId: this.sessionId,
+          status: this.sessionStatus,
+          selectionsCount: Object.keys(this.selections).length
+        });
+        
+        return true;
+      }
+    } catch (error) {
+      console.error('Failed to recover session:', error);
+    }
+    
+    return false;
+  }
+
+  async loadModel() {
+    if (!this.api || !this.modelId) return;
+
+    this.isLoading = true;
+
+    try {
+      const [model, groups, options, rules] = await Promise.all([
+        this.api.getModel(),
+        this.api.getModelGroups(),
+        this.api.getModelOptions(),
+        this.api.getModelRules()
+      ]);
+
+      this.model = model;
+      this.groups = groups;
+      this.options = options;
+      this.rules = rules;
+
+      console.log('Model loaded:', {
+        modelId: this.modelId,
+        groupsCount: this.groups.length,
+        optionsCount: this.options.length,
+        rulesCount: this.rules.length
+      });
+
+    } catch (error) {
+      console.error('Failed to load model:', error);
+      this.error = {
+        message: error.message || 'Failed to load model',
+        code: error.code || 'MODEL_LOAD_ERROR',
+        details: error
+      };
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  // Selection management
+  updateSelection(optionId, quantity) {
+    if (!optionId) return;
+
+    const newQuantity = quantity > 0 ? 1 : 0;
+    
+    // Find the option and its group to check selection type
+    const option = this.options.find(o => o.id === optionId);
+    if (!option) return;
+    
+    const group = this.groups.find(g => g.id === option.group_id);
+    if (!group) return;
+
+    // For single selection groups, clear other selections in the group
+    const isSingleSelect = group.selection_type === 'single' || 
+                          group.selection_type === 'single_required' || 
+                          group.selection_type === 'radio' ||
+                          group.selection_type === 'dropdown';
+    
+    if (isSingleSelect && newQuantity > 0) {
+      // Clear other selections in the same group
+      const groupOptions = this.options.filter(o => o.group_id === group.id);
+      groupOptions.forEach(opt => {
+        if (opt.id !== optionId && this.selections[opt.id]) {
+          delete this.selections[opt.id];
+        }
+      });
+    }
+
+    // Update the selection
+    if (newQuantity > 0) {
+      this.selections[optionId] = newQuantity;
+    } else {
+      delete this.selections[optionId];
+    }
+
+    this.isDirty = true;
+
+    // Debounce backend update
+    if (this.updateTimeout) {
+      clearTimeout(this.updateTimeout);
+    }
+
+    this.updateTimeout = setTimeout(() => {
+      this.updateSelectionsOnBackend();
+    }, 300);
+  }
+
+  async updateSelectionsOnBackend() {
+    if (!this.api || !this.sessionId) return;
+
+    try {
+      // Format selections for API
+      const formattedSelections = Object.entries(this.selections)
+        .filter(([_, quantity]) => quantity > 0)
+        .map(([option_id, quantity]) => ({
+          option_id,
+          quantity: parseInt(quantity) || 1
+        }));
+
+      // Update session with selections
+      const result = await this.api.updateSelections(formattedSelections);
+
+      // Update state with results
+      this.configuration = result.configuration || result.updated_config;
+      this.validationResult = result.validation_result;
+      this.pricingResult = result.price_breakdown;
+      this.availableOptions = result.available_options || [];
+      
+      // Check and deselect invalid options
+      this.checkAndDeselectInvalidOptions(this.availableOptions);
+
+      this.lastSaved = new Date();
+      this.isDirty = false;
+
+      console.log('Session updated:', {
+        sessionId: this.sessionId,
+        selectionsCount: formattedSelections.length,
+        isValid: this.validationResult?.is_valid,
+        totalPrice: this.pricingResult?.total_price
+      });
+
+    } catch (error) {
+      console.error('Failed to update session:', error);
+      this.error = {
+        message: error.message || 'Failed to update selections',
+        code: error.code || 'UPDATE_ERROR',
+        details: error
+      };
+    }
+  }
+
+  checkAndDeselectInvalidOptions(availableOptions) {
+    let anyDeselected = false;
+    
+    if (Array.isArray(availableOptions)) {
+      for (const availableOption of availableOptions) {
+        const option = availableOption.option || availableOption;
+        const optionId = option.id;
+        
+        // If option is currently selected but no longer selectable, deselect it
+        if (this.selections[optionId] && availableOption.is_selectable === false) {
+          delete this.selections[optionId];
+          anyDeselected = true;
+          console.log(`Auto-deselected invalid option: ${option.name} (${optionId})`);
+        }
+      }
+    }
+    
+    if (anyDeselected) {
+      this.isDirty = true;
+    }
+    
+    return anyDeselected;
+  }
+
+  async validateConfiguration() {
+    if (!this.api || !this.sessionId) return;
+
+    try {
+      const result = await this.api.validateSession();
+      this.validationResult = result;
+      return result;
+    } catch (error) {
+      console.error('Failed to validate session:', error);
+      this.error = error;
+    }
+  }
+
+  async calculatePricing() {
+    if (!this.api || !this.sessionId) return;
+
+    try {
+      const result = await this.api.calculatePrice();
+      this.pricingResult = result.breakdown || result;
+      return result;
+    } catch (error) {
+      console.error('Failed to calculate price:', error);
+      this.error = error;
+    }
+  }
+
+  async completeSession() {
+    if (!this.api || !this.sessionId) return;
+
+    try {
+      const result = await this.api.completeSession();
+      this.sessionStatus = 'completed';
+      return result;
+    } catch (error) {
+      console.error('Failed to complete session:', error);
+      this.error = error;
+    }
+  }
+
+  async extendSession(days = 30) {
+    if (!this.api || !this.sessionId) return;
+
+    try {
+      const result = await this.api.extendSession(days);
+      if (result.expires_at) {
+        this.expiresAt = result.expires_at;
+      }
+      return result;
+    } catch (error) {
+      console.error('Failed to extend session:', error);
+      this.error = error;
+    }
+  }
+
+  // Getters
+  get selectedOptions() {
+    return Object.entries(this.selections)
+      .filter(([_, quantity]) => quantity > 0)
+      .map(([optionId]) => this.options.find(o => o.id === optionId))
+      .filter(Boolean);
+  }
+
+  get selectedCount() {
+    return Object.keys(this.selections).filter(id => this.selections[id] > 0).length;
+  }
+
+  get totalPrice() {
+    return this.pricingResult?.total_price || 0;
+  }
+
+  get isValid() {
+    return this.validationResult?.is_valid !== false;
+  }
+
+  get violations() {
+    return this.validationResult?.violations || [];
+  }
+
+  get hasActiveViolations() {
+    return this.violations.some(v => v.severity === 'error' || v.severity === 'Error');
+  }
+
+  get sessionTimeRemaining() {
+    if (!this.expiresAt) return null;
+    
+    const now = new Date();
+    const expires = new Date(this.expiresAt);
+    const diff = expires - now;
+    
+    if (diff <= 0) return 'Expired';
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    
+    if (days > 0) return `${days} days`;
+    return `${hours} hours`;
+  }
+
+  // Utility methods
+  reset() {
+    this.selections = {};
+    this.validationResult = null;
+    this.pricingResult = null;
+    this.availableOptions = [];
+    this.isDirty = false;
+    this.error = null;
+  }
+
+  clearError() {
+    this.error = null;
+  }
+
+  clearSession() {
+    if (this.api) {
+      this.api.clearSession();
+    }
+    this.sessionId = null;
+    this.sessionToken = null;
+    this.sessionStatus = 'draft';
+    this.expiresAt = null;
+    this.reset();
+  }
+}
+
+// Factory function to create store instance
+export function createConfigurationSessionStore() {
+  return new ConfigurationSessionStore();
+}

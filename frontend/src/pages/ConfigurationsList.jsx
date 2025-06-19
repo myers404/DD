@@ -38,10 +38,9 @@ const ConfigurationsList = () => {
     });
 
     // Fetch configurations for this model
-    const { data: configurations, isLoading, error } = useQuery({
-        queryKey: ['configurations', modelId, { status: statusFilter, sort: sortBy, order: sortOrder }],
-        queryFn: () => cpqApi.getConfigurations({
-            model_id: modelId,
+    const { data: configurationsResponse, isLoading, error } = useQuery({
+        queryKey: ['session-configurations', modelId, { status: statusFilter, sort: sortBy, order: sortOrder }],
+        queryFn: () => cpqApi.getSessionConfigurations(modelId, {
             status: statusFilter !== 'all' ? statusFilter : undefined,
             sort_by: sortBy,
             sort_order: sortOrder
@@ -49,6 +48,9 @@ const ConfigurationsList = () => {
         enabled: !!modelId,
         refetchInterval: 30000 // Refresh every 30 seconds
     });
+    
+    // Extract configurations array from response
+    const configurations = configurationsResponse?.configurations || [];
 
     // Filter configurations based on search
     const filteredConfigurations = configurations?.filter(config => {
