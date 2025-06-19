@@ -4,7 +4,9 @@
 package server
 
 import (
+	"crypto/rand"
 	"fmt"
+	mathrand "math/rand"
 	"sync"
 	"time"
 
@@ -50,123 +52,14 @@ func NewCPQService() (*CPQService, error) {
 		startTime: time.Now(),
 	}
 
-	// Load default models (in production, this would come from database)
-	if err := service.loadDefaultModels(); err != nil {
-		return nil, fmt.Errorf("failed to load default models: %w", err)
-	}
+	// Models will be loaded from database when needed
 
 	return service, nil
 }
 
-// loadDefaultModels loads default CPQ models for demonstration
-func (s *CPQService) loadDefaultModels() error {
-	// Create sample model for demonstration
-	model := s.createSampleModel()
-
-	if err := s.AddModel(model); err != nil {
-		return fmt.Errorf("failed to add sample model: %w", err)
-	}
-
-	return nil
-}
-
-// createSampleModel creates a sample CPQ model for demonstration
-func (s *CPQService) createSampleModel() *cpq.Model {
-	model := &cpq.Model{
-		ID:          "sample-laptop",
-		Name:        "Sample Laptop Configuration",
-		Description: "Demonstration laptop configuration model",
-		Version:     "1.0.0",
-		Options:     []cpq.Option{},
-		Groups:      []cpq.Group{},
-		Rules:       []cpq.Rule{},
-		PriceRules:  []cpq.PriceRule{},
-	}
-
-	// Add sample options
-	model.Options = []cpq.Option{
-		{ID: "opt_cpu_basic", Name: "Basic CPU", BasePrice: 200.0, GroupID: "grp_cpu"},
-		{ID: "opt_cpu_high", Name: "High Performance CPU", BasePrice: 500.0, GroupID: "grp_cpu"},
-		{ID: "opt_ram_8gb", Name: "8GB RAM", BasePrice: 100.0, GroupID: "grp_memory"},
-		{ID: "opt_ram_16gb", Name: "16GB RAM", BasePrice: 200.0, GroupID: "grp_memory"},
-		{ID: "opt_storage_ssd", Name: "256GB SSD", BasePrice: 150.0, GroupID: "grp_storage"},
-		{ID: "opt_storage_hdd", Name: "1TB HDD", BasePrice: 80.0, GroupID: "grp_storage"},
-	}
-
-	// Add sample groups
-	model.Groups = []cpq.Group{
-		{
-			ID:        "grp_cpu",
-			Name:      "CPU Selection",
-			Type:      "single-select",
-			OptionIDs: []string{"opt_cpu_basic", "opt_cpu_high"},
-		},
-		{
-			ID:        "grp_memory",
-			Name:      "Memory Selection",
-			Type:      "single-select",
-			OptionIDs: []string{"opt_ram_8gb", "opt_ram_16gb"},
-		},
-		{
-			ID:        "grp_storage",
-			Name:      "Storage Selection",
-			Type:      "single-select",
-			OptionIDs: []string{"opt_storage_ssd", "opt_storage_hdd"},
-		},
-	}
-
-	// Add sample rules
-	model.Rules = []cpq.Rule{
-		{
-			ID:         "rule_cpu_memory",
-			Name:       "High CPU requires 16GB RAM",
-			Type:       "requires",
-			Expression: "opt_cpu_high -> opt_ram_16gb",
-			Priority:   100,
-		},
-	}
-
-	// Add sample pricing rules
-	model.PriceRules = []cpq.PriceRule{
-		{
-			ID:         "pricing_volume_discount",
-			Name:       "Volume Discount",
-			Type:       "volume_tier",
-			Expression: "total_quantity >= 10",
-		},
-	}
-
-	return model
-}
-
 // Model Management
 
-// AddModel adds a new model to the service
-func (s *CPQService) AddModel(model *cpq.Model) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	// Validate model
-	if err := model.Validate(); err != nil {
-		return fmt.Errorf("model validation failed: %w", err)
-	}
-
-	// Create configurator for the model
-	configurator, err := cpq.NewConfigurator(model)
-	if err != nil {
-		return fmt.Errorf("failed to create configurator: %w", err)
-	}
-
-	// Store model and configurator
-	s.models[model.ID] = model
-	s.configurators[model.ID] = configurator
-
-	s.updateStats(func(stats *SystemStats) {
-		stats.ModelsCount++
-	})
-
-	return nil
-}
+// Note: AddModel method is in cpq_service_ext.go to match interface signature
 
 // GetModel retrieves a model by ID
 func (s *CPQService) GetModel(modelID string) (*cpq.Model, error) {
@@ -181,53 +74,51 @@ func (s *CPQService) GetModel(modelID string) (*cpq.Model, error) {
 	return model, nil
 }
 
-// ListModels returns all available models
-func (s *CPQService) ListModels() []*cpq.Model {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+// Note: ListModels method is in cpq_service_ext.go to match interface signature
 
-	models := make([]*cpq.Model, 0, len(s.models))
-	for _, model := range s.models {
-		models = append(models, model)
+// DeleteModel removes a model from the service
+func (s *CPQService) DeleteModel(modelID string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Check if model exists
+	if _, exists := s.models[modelID]; !exists {
+		return fmt.Errorf("model not found: %s", modelID)
 	}
 
-	return models
+	// Remove model and configurator
+	delete(s.models, modelID)
+	delete(s.configurators, modelID)
+
+	s.updateStats(func(stats *SystemStats) {
+		stats.ModelsCount--
+	})
+
+	return nil
 }
 
 // Configuration Management
 
-// CreateConfiguration creates a new configuration for a model
-func (s *CPQService) CreateConfiguration(modelID string) (*cpq.Configuration, error) {
-	// Validate that the model exists
-	s.mutex.RLock()
-	_, modelExists := s.models[modelID]
-	s.mutex.RUnlock()
-
-	if !modelExists {
-		return nil, fmt.Errorf("model not found: %s", modelID)
-	}
-
-	config := cpq.Configuration{
-		ID:         generateConfigID(),
-		ModelID:    modelID,
-		Selections: make([]cpq.Selection, 0),
-		IsValid:    true,
-		TotalPrice: 0.0,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
-	}
-
-	s.updateStats(func(stats *SystemStats) {
-		stats.ConfigurationsCount++
-		stats.TotalRequests++
-	})
-
-	return &config, nil
-}
+// Note: CreateConfiguration method is in cpq_service_ext.go to match interface signature
 
 // Helper function to generate unique configuration IDs
 func generateConfigID() string {
-	return fmt.Sprintf("config-%d", time.Now().UnixNano())
+	// Generate a UUID v4 for PostgreSQL compatibility
+	return generateUUID()
+}
+
+func generateUUID() string {
+	// Simple UUID v4 generation
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback to timestamp-based ID if random fails
+		return fmt.Sprintf("%d-%d-%d-%d", time.Now().Unix(), time.Now().UnixNano(), mathrand.Int31(), mathrand.Int31())
+	}
+	// Set version (4) and variant bits
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // UpdateConfiguration updates an existing configuration
@@ -288,8 +179,8 @@ func (s *CPQService) ValidateConfiguration(modelID string, configID string) (*cp
 	return &result, nil
 }
 
-// CalculatePrice calculates pricing for a configuration
-func (s *CPQService) CalculatePrice(modelID string, configID string) (*cpq.PriceBreakdown, error) {
+// CalculatePriceBreakdown calculates pricing breakdown for a configuration
+func (s *CPQService) CalculatePriceBreakdown(modelID string, configID string) (*cpq.PriceBreakdown, error) {
 	s.mutex.RLock()
 	configurator, exists := s.configurators[modelID]
 	s.mutex.RUnlock()
@@ -369,33 +260,7 @@ func (s *CPQService) DetectConflicts(modelID string) ([]modelbuilder.RuleConflic
 	return result.Conflicts, nil
 }
 
-// AnalyzeImpact analyzes the impact of rule changes
-func (s *CPQService) AnalyzeImpact(modelID string, changeType string, oldRule *cpq.Rule, newRule *cpq.Rule) (*modelbuilder.ImpactAnalysis, error) {
-	model, err := s.GetModel(modelID)
-	if err != nil {
-		return nil, err
-	}
-
-	analyzer, err := modelbuilder.NewImpactAnalyzer(model)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create impact analyzer: %w", err)
-	}
-
-	start := time.Now()
-
-	impact, err := analyzer.AnalyzeRuleChange(changeType, oldRule, newRule)
-	if err != nil {
-		return nil, fmt.Errorf("impact analysis failed: %w", err)
-	}
-
-	duration := time.Since(start)
-	s.updateStats(func(stats *SystemStats) {
-		stats.TotalRequests++
-		stats.AvgResponseTime = (stats.AvgResponseTime + duration) / 2
-	})
-
-	return impact, nil
-}
+// Note: AnalyzeImpact method is in cpq_service_ext.go to match interface signature
 
 // ManagePriorities manages rule priorities
 func (s *CPQService) ManagePriorities(modelID string) (*modelbuilder.PriorityAnalysis, error) {
@@ -456,15 +321,8 @@ func (s *CPQService) ResetStats() {
 
 // Health check
 func (s *CPQService) HealthCheck() error {
-	// Verify core components are accessible
-	if len(s.models) == 0 {
-		return fmt.Errorf("no models loaded")
-	}
-
-	if len(s.configurators) == 0 {
-		return fmt.Errorf("no configurators available")
-	}
-
+	// Service is healthy even with no models loaded
+	// Models can be loaded dynamically as needed
 	return nil
 }
 

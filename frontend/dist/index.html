@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="CPQ Enterprise Configuration System - Configure, Price, Quote" />
+    <meta name="keywords" content="CPQ, Configuration, Pricing, Quote, Enterprise" />
+    <meta name="author" content="CPQ Enterprise Systems" />
+    
+    <!-- Theme Color for Mobile -->
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="msapplication-TileColor" content="#2563eb" />
+    
+    <!-- Apple Touch Icon -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    
+    <!-- Manifest for PWA -->
+    <link rel="manifest" href="/assets/manifest-Bakbj6m5.json" />
+    
+    <!-- Preconnect to External Resources -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Page Title -->
+    <title>CPQ Enterprise Configuration System</title>
+    
+    <!-- Performance Hints -->
+    <link rel="dns-prefetch" href="//fonts.googleapis.com" />
+    <link rel="dns-prefetch" href="//fonts.gstatic.com" />
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block" />
+    
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="CPQ Enterprise Configuration System" />
+    <meta property="og:description" content="Advanced Configure-Price-Quote system with real-time constraint resolution" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://your-domain.com" />
+    <meta property="og:image" content="/og-image.png" />
+    
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CPQ Enterprise Configuration System" />
+    <meta name="twitter:description" content="Advanced Configure-Price-Quote system with real-time constraint resolution" />
+    <meta name="twitter:image" content="/twitter-image.png" />
+    
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "CPQ Enterprise Configuration System",
+      "description": "Advanced Configure-Price-Quote system with real-time constraint resolution",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web Browser",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+    
+    <!-- Critical CSS (inline for performance) -->
+    <style>
+      /* Critical loading styles */
+      .loading-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      }
+      
+      .loading-spinner {
+        width: 50px;
+        height: 50px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s ease-in-out infinite;
+        margin-bottom: 20px;
+      }
+      
+      .loading-text {
+        color: white;
+        font-size: 18px;
+        font-weight: 500;
+        margin-bottom: 8px;
+      }
+      
+      .loading-subtitle {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 14px;
+        font-weight: 400;
+      }
+      
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      
+      /* Hide loading screen when React loads */
+      .app-loaded .loading-screen {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease-out;
+      }
+      
+      /* Prevent flash of unstyled content */
+      #root:empty {
+        display: none;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/js/index-9uOhN1Gr.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/js/react-vendor-Dpmj3Mlm.js">
+    <link rel="modulepreload" crossorigin href="/assets/js/query-vendor-BiQ4PM1H.js">
+    <link rel="modulepreload" crossorigin href="/assets/js/ui-vendor-DfZcDE7P.js">
+    <link rel="modulepreload" crossorigin href="/assets/js/form-vendor-Cz442zfz.js">
+    <link rel="stylesheet" crossorigin href="/assets/css/index-zUktqd_j.css">
+  </head>
+  
+  <body>
+    <!-- Loading Screen -->
+    <div class="loading-screen" id="loading-screen">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">CPQ Enterprise System</div>
+      <div class="loading-subtitle">Loading your configuration interface...</div>
+    </div>
+    
+    <!-- React App Root -->
+    <div id="root"></div>
+    
+    <!-- Error Fallback (if JavaScript fails) -->
+    <noscript>
+      <div style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #f3f4f6;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        text-align: center;
+        padding: 20px;
+      ">
+        <h1 style="color: #1f2937; margin-bottom: 16px;">JavaScript Required</h1>
+        <p style="color: #6b7280; max-width: 400px; line-height: 1.5;">
+          CPQ Enterprise Configuration System requires JavaScript to function properly. 
+          Please enable JavaScript in your browser and refresh the page.
+        </p>
+        <button 
+          onclick="location.reload()" 
+          style="
+            margin-top: 20px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+          "
+        >
+          Refresh Page
+        </button>
+      </div>
+    </noscript>
+    
+    <!-- Environment Detection -->
+    <script>
+      // Set environment class for CSS targeting
+      document.documentElement.className += ' ' + (
+        window.location.hostname === 'localhost' || 
+        window.location.hostname === '127.0.0.1' ||
+        window.location.hostname === ''
+      ) ? 'env-development' : 'env-production';
+      
+      // Performance monitoring
+      window.appStartTime = Date.now();
+      
+      // Error handling for uncaught errors
+      window.addEventListener('error', function(event) {
+        console.error('Global error:', event.error);
+        // In production, you might want to send this to an error tracking service
+      });
+      
+      window.addEventListener('unhandledrejection', function(event) {
+        console.error('Unhandled promise rejection:', event.reason);
+        // In production, you might want to send this to an error tracking service
+      });
+    </script>
+    
+    <!-- React App Script -->
+    
+    <!-- Hide loading screen after a timeout (fallback) -->
+    <script>
+      setTimeout(function() {
+        var loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+          loadingScreen.style.display = 'none';
+        }
+      }, 10000); // 10 second timeout
+    </script>
+  </body>
+</html>

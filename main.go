@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"DD/auth"
+	"DD/cache"
 	"DD/database"
+	"DD/repository"
 	"DD/server"
 	"github.com/joho/godotenv"
 )
@@ -75,16 +77,42 @@ func main() {
 	// Create auth adapter for server integration
 	authAdapter := server.NewAuthServiceAdapter(authService)
 
-	// Initialize CPQ service
-	cpqService, err := server.NewCPQService()
-	if err != nil {
-		log.Fatalf("❌ Failed to create CPQ service: %v", err)
-	}
-
-	// If database is available, enhance CPQ service with database integration
+	// Initialize CPQ service with repository pattern
+	var cpqService server.CPQServiceInterface
 	if db != nil {
-		// You can extend CPQService to support database operations here
-		log.Printf("🔧 CPQ service configured with database support")
+		// Use the new service with database support
+		log.Printf("🔧 Initializing CPQ service with database support...")
+		
+		// Create repositories
+		modelRepo := repository.NewPostgresModelRepository(db)
+		configRepo := repository.NewPostgresConfigRepository(db)
+		
+		// Create cache
+		cacheConfig := cache.NewCacheConfig()
+		cacheRepo, err := cache.NewCacheRepository(cacheConfig)
+		if err != nil {
+			log.Printf("⚠️ Failed to create cache, using in-memory: %v", err)
+			cacheRepo = cache.NewMemoryCache("cpq", 100*1024*1024) // 100MB
+		}
+		
+		// Create enhanced service
+		cpqServiceV2, err := server.NewCPQServiceV2(modelRepo, configRepo, cacheRepo)
+		if err != nil {
+			log.Fatalf("❌ Failed to create CPQ service: %v", err)
+		}
+		cpqService = cpqServiceV2
+		
+		log.Printf("✅ CPQ service initialized with database and cache support")
+		log.Printf("📊 Cache type: %s", cacheConfig.Type)
+		
+	} else {
+		// Fall back to in-memory service
+		log.Printf("⚠️ No database configured, using in-memory CPQ service")
+		cpqServiceV1, err := server.NewCPQService()
+		if err != nil {
+			log.Fatalf("❌ Failed to create CPQ service: %v", err)
+		}
+		cpqService = cpqServiceV1
 	}
 
 	// Create server configuration

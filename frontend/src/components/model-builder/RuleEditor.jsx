@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -8,10 +8,10 @@ import {
   TrashIcon,
   EyeIcon,
   CodeBracketIcon,
-  CheckIcon,
-  XMarkIcon,
   InformationCircleIcon,
 } from '@heroicons/react/24/outline';
+import { ensureArray } from '../../utils/arrayUtils';
+import ExpressionEditor from './ExpressionEditor';
 
 // Validation schema
 const ruleSchema = z.object({
@@ -31,7 +31,19 @@ const RuleEditor = ({
   isLoading = false,
 }) => {
   const [showPreview, setShowPreview] = useState(false);
-  const [expressionBuilder, setExpressionBuilder] = useState([]);
+
+  // Map backend rule types to frontend rule types
+  const mapBackendRuleType = (backendType) => {
+    const typeMap = {
+      'validation_rule': 'constraint',
+      'requires': 'dependency',
+      'excludes': 'exclusion',
+      'mutual_exclusive': 'exclusion',
+      'group_limit': 'constraint',
+      'pricing_rule': 'constraint'
+    };
+    return typeMap[backendType] || 'constraint';
+  };
 
   const {
     register,
@@ -44,66 +56,95 @@ const RuleEditor = ({
     resolver: zodResolver(ruleSchema),
     defaultValues: {
       name: rule?.name || '',
-      description: rule?.description || '',
-      type: rule?.type || 'constraint',
+      description: rule?.message || '', // Use message field from backend as description
+      type: rule?.type ? mapBackendRuleType(rule.type) : 'constraint', // Map backend type to frontend type
       priority: rule?.priority || 50,
       expression: rule?.expression || '',
-      isActive: rule?.isActive !== false,
+      isActive: rule?.is_active !== false, // Handle snake_case from backend
     },
   });
 
   const watchedExpression = watch('expression');
   const watchedType = watch('type');
 
-  // Rule type configurations
+  // Rule type configurations with updated examples using correct syntax
   const ruleTypes = {
     constraint: {
       label: 'Constraint Rule',
       description: 'Defines what combinations are allowed or not allowed',
       color: 'blue',
-      examples: ['option_a AND option_b', 'NOT (option_c AND option_d)'],
+      examples: ['option_a && option_b', '!(option_c && option_d)', 'option_a || option_b'],
     },
     dependency: {
       label: 'Dependency Rule',
       description: 'Specifies that one option requires another',
       color: 'green',
-      examples: ['option_a REQUIRES option_b', 'option_c -> option_d'],
+      examples: ['option_a -> option_b', 'IMPLIES(option_a, option_b)', '(option_a && option_b) -> option_c'],
     },
     exclusion: {
       label: 'Exclusion Rule',
       description: 'Defines mutually exclusive options',
       color: 'red',
-      examples: ['option_a EXCLUDES option_b', 'option_c XOR option_d'],
+      examples: ['XOR(option_a, option_b)', '!(option_a && option_b)', 'option_a != option_b'],
     },
     requirement: {
       label: 'Requirement Rule',
       description: 'Specifies mandatory options under certain conditions',
       color: 'purple',
-      examples: ['IF option_a THEN REQUIRED option_b', 'option_c => MUST option_d'],
+      examples: ['ITE(condition, option_a, true)', 'condition -> option_a', 'THRESHOLD(sum_options, 1)'],
     },
   };
 
-  // Expression building blocks
+  // Expression building blocks - updated to correct syntax
   const operators = [
-    { label: 'AND', value: 'AND', description: 'Both conditions must be true' },
-    { label: 'OR', value: 'OR', description: 'Either condition can be true' },
-    { label: 'NOT', value: 'NOT', description: 'Negates the condition' },
-    { label: 'REQUIRES', value: 'REQUIRES', description: 'First option requires second' },
-    { label: 'EXCLUDES', value: 'EXCLUDES', description: 'Options are mutually exclusive' },
-    { label: 'IF...THEN', value: 'IF...THEN', description: 'Conditional requirement' },
+    { label: '&&', value: '&&', description: 'Logical AND - both conditions must be true' },
+    { label: '||', value: '||', description: 'Logical OR - either condition can be true' },
+    { label: '!', value: '!', description: 'Logical NOT - negates the condition' },
+    { label: '->', value: '->', description: 'Implies - if first then second' },
+    { label: '<->', value: '<->', description: 'Equivalence - both have same truth value' },
+    { label: '==', value: '==', description: 'Equality comparison' },
+    { label: '!=', value: '!=', description: 'Inequality comparison' },
+    { label: '>', value: '>', description: 'Greater than' },
+    { label: '<', value: '<', description: 'Less than' },
+  ];
+
+  const functions = [
+    { label: 'ITE(cond, then, else)', value: 'ITE(', description: 'If-then-else conditional' },
+    { label: 'IMPLIES(a, b)', value: 'IMPLIES(', description: 'Logical implication function' },
+    { label: 'EQUIV(a, b)', value: 'EQUIV(', description: 'Logical equivalence function' },
+    { label: 'XOR(a, b)', value: 'XOR(', description: 'Exclusive OR function' },
+    { label: 'MIN(a, b)', value: 'MIN(', description: 'Minimum of two values' },
+    { label: 'MAX(a, b)', value: 'MAX(', description: 'Maximum of two values' },
+    { label: 'ABS(x)', value: 'ABS(', description: 'Absolute value' },
+    { label: 'THRESHOLD(x, limit)', value: 'THRESHOLD(', description: 'Check if x >= limit' },
   ];
 
   // Get available options for expression building
-  const availableOptions = model?.options || [];
+  const availableOptions = ensureArray(model?.options);
+
+  // Map frontend rule types to backend rule types
+  const mapRuleType = (frontendType) => {
+    const typeMap = {
+      'constraint': 'validation_rule',
+      'dependency': 'requires',
+      'exclusion': 'excludes',
+      'requirement': 'requires'
+    };
+    return typeMap[frontendType] || frontendType;
+  };
 
   // Handle form submission
   const onSubmit = (data) => {
+    // Transform data to match backend expectations
+    // Only include fields that the backend expects
     const ruleData = {
-      ...data,
       id: rule?.id || `rule_${Date.now()}`,
-      modelId: model?.id,
-      createdAt: rule?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      name: data.name,
+      type: mapRuleType(data.type), // Map to backend rule type
+      expression: data.expression,
+      message: data.description || '', // Use description as message
+      is_active: data.isActive,
+      priority: data.priority || 50,
     };
 
     onSave(ruleData);
@@ -126,43 +167,25 @@ const RuleEditor = ({
     addToExpression(option.id);
   };
 
-  // Validate expression syntax
-  const validateExpression = (expression) => {
-    if (!expression) return { isValid: false, errors: ['Expression is required'] };
-    
-    const errors = [];
-    
-    // Basic syntax validation
-    const hasBalancedParentheses = (str) => {
-      let count = 0;
-      for (let char of str) {
-        if (char === '(') count++;
-        if (char === ')') count--;
-        if (count < 0) return false;
-      }
-      return count === 0;
-    };
+  // Expression validation state
+  const [expressionValidation, setExpressionValidation] = useState({ isValid: true, errors: [] });
 
-    if (!hasBalancedParentheses(expression)) {
-      errors.push('Unbalanced parentheses');
-    }
-
-    // Check for valid option references
-    const tokens = expression.split(/\s+/);
-    const validOperators = ['AND', 'OR', 'NOT', 'REQUIRES', 'EXCLUDES', 'IF', 'THEN', '(', ')'];
-    
-    tokens.forEach(token => {
-      if (!validOperators.includes(token) && !availableOptions.some(opt => opt.id === token)) {
-        if (token !== '') {
-          errors.push(`Unknown option or operator: ${token}`);
-        }
+  // Handle expression validation result from ExpressionEditor
+  const handleExpressionValidation = useCallback((validationResult) => {
+    setExpressionValidation(prev => {
+      const newValidation = {
+        isValid: validationResult?.success === true,
+        errors: validationResult?.errors || []
+      };
+      
+      // Only update if validation actually changed
+      if (prev.isValid !== newValidation.isValid || 
+          JSON.stringify(prev.errors) !== JSON.stringify(newValidation.errors)) {
+        return newValidation;
       }
+      return prev;
     });
-
-    return { isValid: errors.length === 0, errors };
-  };
-
-  const expressionValidation = validateExpression(watchedExpression);
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -327,6 +350,24 @@ const RuleEditor = ({
                   </div>
                 </div>
 
+                {/* Functions */}
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Functions</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {functions.map((func) => (
+                      <button
+                        key={func.value}
+                        type="button"
+                        onClick={() => insertOperator(func.value)}
+                        className="px-3 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 rounded-full hover:bg-indigo-200"
+                        title={func.description}
+                      >
+                        {func.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Available Options */}
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-2">
@@ -334,7 +375,7 @@ const RuleEditor = ({
                   </h4>
                   <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-2">
                     <div className="space-y-1">
-                      {availableOptions.map((option) => (
+                      {ensureArray(availableOptions).map((option) => (
                         <button
                           key={option.id}
                           type="button"
@@ -372,7 +413,7 @@ const RuleEditor = ({
           </div>
         </div>
 
-        {/* Expression Input */}
+        {/* Expression Editor */}
         <div className="bg-white p-6 rounded-lg border border-gray-200">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Rule Expression</h3>
           
@@ -381,43 +422,35 @@ const RuleEditor = ({
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Expression
               </label>
-              <textarea
-                {...register('expression')}
-                rows={4}
-                className={`w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-blue-500 focus:border-blue-500 ${
-                  expressionValidation.isValid ? 'border-gray-300' : 'border-red-300'
-                }`}
-                placeholder="Enter your rule expression..."
+              <ExpressionEditor
+                value={watchedExpression || ''}
+                onChange={(newValue) => setValue('expression', newValue)}
+                onValidationChange={handleExpressionValidation}
+                variables={availableOptions.reduce((acc, opt) => ({ ...acc, [opt.id]: true }), {})}
+                placeholder="Enter your rule expression using backend syntax..."
+                showValidation={true}
+                showVariables={false}
+                showWarnings={true}
+                height="200px"
+                className="border border-gray-300 rounded-lg focus-within:ring-blue-500 focus-within:border-blue-500"
               />
             </div>
 
-            {/* Validation Results */}
-            {watchedExpression && (
-              <div className={`p-3 rounded-lg ${
-                expressionValidation.isValid ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
-              }`}>
-                <div className="flex items-center">
-                  {expressionValidation.isValid ? (
-                    <CheckIcon className="h-5 w-5 text-green-600 mr-2" />
-                  ) : (
-                    <XMarkIcon className="h-5 w-5 text-red-600 mr-2" />
-                  )}
-                  <span className={`text-sm font-medium ${
-                    expressionValidation.isValid ? 'text-green-800' : 'text-red-800'
-                  }`}>
-                    {expressionValidation.isValid ? 'Expression is valid' : 'Expression has errors'}
-                  </span>
+            {/* Syntax Help */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="flex items-start">
+                <InformationCircleIcon className="h-5 w-5 text-blue-600 mr-2 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <div className="font-medium mb-1">Supported Syntax:</div>
+                  <div className="space-y-1 text-xs">
+                    <div><strong>Logical:</strong> {`&& (AND), || (OR), ! (NOT), -> (IMPLIES), <-> (EQUIV)`}</div>
+                    <div><strong>Comparison:</strong> {`==, !=, <, <=, >, >=`}</div>
+                    <div><strong>Arithmetic:</strong> +, -, *, /, %</div>
+                    <div><strong>Functions:</strong> ITE(cond, then, else), IMPLIES(a, b), XOR(a, b), ABS(x), MIN/MAX(a, b)</div>
+                  </div>
                 </div>
-                
-                {!expressionValidation.isValid && expressionValidation.errors.length > 0 && (
-                  <ul className="mt-2 text-sm text-red-700 list-disc list-inside">
-                    {expressionValidation.errors.map((error, index) => (
-                      <li key={index}>{error}</li>
-                    ))}
-                  </ul>
-                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
 

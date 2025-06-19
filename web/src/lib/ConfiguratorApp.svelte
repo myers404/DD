@@ -1,5 +1,5 @@
 <!-- web/src/lib/ConfiguratorApp.svelte -->
-<!-- Simplified: Just selections, live updates, and save -->
+<!-- Simplified design matching ConstraintTester style -->
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { createEventDispatcher } from 'svelte';
@@ -24,7 +24,6 @@
   const dispatch = createEventDispatcher();
 
   let mounted = $state(false);
-  let autoSaveInterval = null;
 
   // Set API URL globally
   if (typeof window !== 'undefined') {
@@ -47,26 +46,6 @@
 
     // Set theme
     document.documentElement.setAttribute('data-theme', theme);
-
-    // Setup auto-save
-    autoSaveInterval = setInterval(() => {
-      if (configStore.isDirty && configStore.configurationId) {
-        configStore.saveConfiguration();
-      }
-    }, 30000); // Every 30 seconds
-  });
-
-  onDestroy(() => {
-    if (autoSaveInterval) {
-      clearInterval(autoSaveInterval);
-    }
-  });
-
-  // Debug: log pricing updates
-  $effect(() => {
-    if (configStore.pricingData) {
-      console.log('Pricing updated:', configStore.pricingData);
-    }
   });
 
   // Watch for configuration changes
@@ -84,7 +63,7 @@
   });
 
   async function handleSave() {
-    if (configStore.isSaving) return; // Prevent double-clicks
+    if (configStore.isSaving) return;
 
     const saved = await configStore.saveConfiguration();
     if (saved) {
@@ -113,7 +92,7 @@
           <div class="error-icon">⚠️</div>
           <h2>Configuration Error</h2>
           <p>{configStore.error.message || 'Failed to load configuration'}</p>
-          <button class="retry-button" on:click={retry}>
+          <button class="retry-button" onclick={retry}>
             Try Again
           </button>
         </div>
@@ -130,101 +109,100 @@
         </div>
       </div>
     {:else}
-      <div class="configurator-layout">
+      <div class="configurator-container">
         <!-- Header -->
-        <div class="configurator-header">
-          <div>
-            <h1>{configStore.model.name}</h1>
-            {#if configStore.model.description}
-              <p>{configStore.model.description}</p>
-            {/if}
-          </div>
-          <div class="header-actions">
-            {#if configStore.configurationId}
-              <span class="config-id">ID: {configStore.configurationId}</span>
-            {/if}
-            {#if configStore.lastSaved}
-              <span class="last-saved">Saved {new Date(configStore.lastSaved).toLocaleTimeString()}</span>
-            {/if}
-          </div>
+        <div class="header-card">
+          <h2 class="model-title">{configStore.model.name}</h2>
+          {#if configStore.model.description}
+            <p class="model-description">{configStore.model.description}</p>
+          {/if}
         </div>
 
-        <!-- Main Content -->
-        <div class="configurator-content">
-          <!-- Left: Options -->
-          <div class="options-panel">
-            {#if configStore.isValidating}
-              <div class="validating-indicator">
-                <LoadingSpinner size="small" /> Checking availability...
-              </div>
-            {/if}
+        <div class="main-grid">
+          <!-- Left Column: Option Groups -->
+          <div class="options-column">
+            <div class="card">
+              <h3 class="section-title">Configuration Options</h3>
+              
+              {#if configStore.isValidating}
+                <div class="validating-indicator">
+                  <LoadingSpinner size="small" /> Checking constraints...
+                </div>
+              {/if}
 
-            {#if Array.isArray(configStore.groups) && configStore.groups.length > 0}
-              <div class="groups-container">
-                {#each configStore.groups as group (group.id)}
-                  {@const groupOptions = Array.isArray(configStore.options)
-                          ? configStore.options.filter(o => o.group_id === group.id)
-                          : []}
-                  <OptionGroup
-                          {group}
-                          options={groupOptions}
-                          selections={configStore.selections || {}}
-                          availableOptions={configStore.availableOptions || []}
-                          onSelectionChange={(optionId, value) => configStore.updateSelection(optionId, value)}
-                          expanded={configStore.isGroupExpanded(group.id)}
-                          onToggle={() => configStore.toggleGroup(group.id)}
-                  />
-                {/each}
-              </div>
-            {:else}
-              <div class="empty-state">
-                <p>No option groups available for this model.</p>
-              </div>
-            {/if}
+              {#if Array.isArray(configStore.groups) && configStore.groups.length > 0}
+                <div class="groups-container">
+                  {#each configStore.groups.filter(g => g.is_active !== false) as group (group.id)}
+                    {@const groupOptions = Array.isArray(configStore.options)
+                            ? configStore.options.filter(o => o.group_id === group.id && o.is_active !== false)
+                            : []}
+                    <OptionGroup
+                            {group}
+                            options={groupOptions}
+                            selections={configStore.selections || {}}
+                            availableOptions={configStore.availableOptions || []}
+                            onSelectionChange={(optionId, value) => configStore.updateSelection(optionId, value)}
+                    />
+                  {/each}
+                </div>
+              {:else}
+                <div class="empty-state">
+                  <p>No option groups available for this model.</p>
+                </div>
+              {/if}
+            </div>
           </div>
 
-          <!-- Right: Sidebar -->
-          <div class="sidebar">
-            <!-- Validation Display -->
-            {#if configStore.validationResults && !configStore.isValid}
-              <div class="sidebar-section validation-section">
-                <ValidationDisplay
-                        results={configStore.validationResults}
-                        compact={true}
-                />
-              </div>
-            {/if}
+          <!-- Middle Column: Validation Results -->
+          <div class="validation-column">
+            <div class="card">
+              <h3 class="section-title">Constraint Validation</h3>
+              <ValidationDisplay
+                      validationResults={configStore.validationResults}
+                      model={configStore.model}
+              />
+            </div>
+          </div>
 
-            <!-- Pricing Display -->
-            <div class="sidebar-section">
+          <!-- Right Column: Pricing & Actions -->
+          <div class="pricing-column">
+            <div class="card">
+              <h3 class="section-title">Configuration Summary</h3>
+              
               <PricingDisplay
                       pricing={configStore.pricingData}
                       isCalculating={configStore.isPricing}
                       selections={configStore.selections || {}}
                       options={configStore.options || []}
               />
-            </div>
 
-            <!-- Save Button -->
-            <div class="sidebar-actions">
-              <button
-                      class="save-button"
-                      on:click={handleSave}
-                      disabled={configStore.isSaving || !configStore.isValid || configStore.selectedCount === 0}
-              >
-                {#if configStore.isSaving}
-                  <LoadingSpinner size="small" /> Saving...
-                {:else}
-                  Save Configuration
+              <div class="actions-container">
+                <button
+                        class="save-button"
+                        onclick={handleSave}
+                        disabled={configStore.isSaving || !configStore.isValid || configStore.selectedCount === 0}
+                        class:saving={configStore.isSaving}
+                >
+                  {#if configStore.isSaving}
+                    <LoadingSpinner size="small" /> Saving...
+                  {:else}
+                    Save Configuration
+                  {/if}
+                </button>
+
+                {#if configStore.isDirty}
+                  <div class="unsaved-indicator">
+                    <span class="unsaved-dot"></span>
+                    Unsaved changes
+                  </div>
                 {/if}
-              </button>
 
-              {#if configStore.isDirty}
-                <div class="unsaved-indicator">
-                  <span class="unsaved-dot"></span>
-                  Unsaved changes
-                </div>
-              {/if}
+                {#if configStore.lastSaved}
+                  <div class="saved-info">
+                    Last saved: {new Date(configStore.lastSaved).toLocaleTimeString()}
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
         </div>
@@ -236,11 +214,13 @@
 <style>
   .configurator-app {
     min-height: 100vh;
-    background-color: #f9fafb;
+    background-color: #f3f4f6;
+    padding: 24px;
   }
 
   .configurator-app.embed-mode {
     min-height: auto;
+    padding: 0;
     background-color: white;
   }
 
@@ -289,112 +269,92 @@
     background-color: #2563eb;
   }
 
-  .configurator-layout {
-    max-width: 1280px;
+  .configurator-container {
+    max-width: 1400px;
     margin: 0 auto;
+  }
+
+  .header-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
     padding: 24px;
+    margin-bottom: 24px;
   }
 
-  .configurator-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: start;
-    margin-bottom: 32px;
-  }
-
-  .configurator-header h1 {
+  .model-title {
     margin: 0 0 8px 0;
     font-size: 32px;
+    font-weight: 700;
     color: #111827;
   }
 
-  .configurator-header p {
+  .model-description {
     margin: 0;
-    font-size: 18px;
+    font-size: 16px;
     color: #6b7280;
   }
 
-  .header-actions {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-    font-size: 14px;
-    color: #6b7280;
-  }
-
-  .config-id {
-    font-family: monospace;
-  }
-
-  .configurator-content {
+  .main-grid {
     display: grid;
-    grid-template-columns: 1fr 380px;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 24px;
-    align-items: start;
   }
 
-  .options-panel {
+  .card {
     background: white;
-    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
     padding: 24px;
-    min-height: 600px;
+  }
+
+  .section-title {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
   }
 
   .validating-indicator {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px;
-    background-color: #fef3c7;
+    padding: 8px 12px;
+    background: #fef3c7;
     border-radius: 6px;
-    margin-bottom: 16px;
     font-size: 14px;
     color: #92400e;
+    margin-bottom: 16px;
   }
 
   .groups-container {
-    /* Groups stack vertically with spacing handled by OptionGroup */
+    display: flex;
+    flex-direction: column;
   }
 
   .empty-state {
     text-align: center;
-    padding: 80px 40px;
+    padding: 32px;
     color: #6b7280;
   }
 
-  .sidebar {
-    position: sticky;
-    top: 24px;
-  }
-
-  .sidebar-section {
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-  }
-
-  .validation-section {
-    border: 2px solid #fbbf24;
-    background-color: #fffbeb;
-  }
-
-  .sidebar-actions {
-    margin-top: 16px;
+  .actions-container {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid #e5e7eb;
   }
 
   .save-button {
     width: 100%;
-    background-color: #10b981;
+    background-color: #3b82f6;
     color: white;
     border: none;
-    padding: 16px;
-    border-radius: 8px;
+    padding: 12px 24px;
+    border-radius: 6px;
     font-size: 16px;
     font-weight: 500;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -402,60 +362,76 @@
   }
 
   .save-button:hover:not(:disabled) {
-    background-color: #059669;
+    background-color: #2563eb;
   }
 
   .save-button:disabled {
-    background-color: #e5e7eb;
-    color: #9ca3af;
+    background-color: #9ca3af;
     cursor: not-allowed;
+  }
+
+  .save-button.saving {
+    background-color: #6b7280;
   }
 
   .unsaved-indicator {
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 8px;
     margin-top: 12px;
     font-size: 14px;
-    color: #6b7280;
+    color: #f59e0b;
   }
 
   .unsaved-dot {
     width: 8px;
     height: 8px;
-    background-color: #fbbf24;
+    background-color: #f59e0b;
     border-radius: 50%;
     animation: pulse 2s infinite;
   }
 
+  .saved-info {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #6b7280;
+    text-align: center;
+  }
+
   @keyframes pulse {
-    0%, 100% {
+    0% {
       opacity: 1;
     }
     50% {
       opacity: 0.5;
     }
+    100% {
+      opacity: 1;
+    }
   }
 
-  /* Responsive */
+  /* Responsive layout */
   @media (max-width: 1024px) {
-    .configurator-content {
+    .main-grid {
       grid-template-columns: 1fr;
     }
+  }
 
-    .sidebar {
-      position: static;
-      order: -1;
+  @media (max-width: 640px) {
+    .configurator-app {
+      padding: 16px;
     }
 
-    .configurator-header {
-      flex-direction: column;
-      gap: 16px;
+    .header-card {
+      padding: 16px;
     }
 
-    .header-actions {
-      align-items: flex-start;
+    .card {
+      padding: 16px;
+    }
+
+    .model-title {
+      font-size: 24px;
     }
   }
 </style>

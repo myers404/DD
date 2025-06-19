@@ -3,6 +3,7 @@
 
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
+import { apiExtractors, extractApiData } from '../utils/apiUtils';
 
 // Get backend URL from environment or default to localhost
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -189,12 +190,31 @@ export const cpqApi = {
   },
 
   createModel: async (modelData) => {
-    const response = await apiClient.post('/models', modelData);
+    // Transform basic form data into proper cpq.Model structure
+    const modelPayload = {
+      name: modelData.name,
+      description: modelData.description || '',
+      version: modelData.version || '1.0.0',
+      groups: [],
+      options: [],
+      rules: [],
+      price_rules: [],
+      is_active: true
+    };
+    
+    const response = await apiClient.post('/models', modelPayload);
     return response.data;
   },
 
   updateModel: async (modelId, modelData) => {
-    const response = await apiClient.put(`/models/${modelId}`, modelData);
+    // Transform basic form data into proper update payload
+    const updatePayload = {
+      name: modelData.name,
+      description: modelData.description || '',
+      version: modelData.version || '1.0.0'
+    };
+    
+    const response = await apiClient.put(`/models/${modelId}`, updatePayload);
     return response.data;
   },
 
@@ -203,51 +223,60 @@ export const cpqApi = {
     return response.data;
   },
 
+  cloneModel: async (modelId) => {
+    const response = await apiClient.post(`/models/${modelId}/clone`);
+    return response.data;
+  },
+
   // Model Groups
   getModelGroups: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/groups`);
-    return response.data;
+    return apiExtractors.groups(response.data);
   },
 
   getModelGroupsWithOptions: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/groups?include=options`);
-    return response.data;
+    return apiExtractors.groups(response.data);
   },
 
   createGroup: async (modelId, groupData) => {
+    console.log(`API: Creating group for model ${modelId}:`, groupData);
     const response = await apiClient.post(`/models/${modelId}/groups`, groupData);
-    return response.data;
+    console.log('API: Create group response:', response.data);
+    return extractApiData(response.data);
   },
 
   updateGroup: async (modelId, groupId, groupData) => {
+    console.log(`API: Updating group ${groupId} for model ${modelId}:`, groupData);
     const response = await apiClient.put(`/models/${modelId}/groups/${groupId}`, groupData);
-    return response.data;
+    console.log('API: Update group response:', response.data);
+    return extractApiData(response.data);
   },
 
   deleteGroup: async (modelId, groupId) => {
     const response = await apiClient.delete(`/models/${modelId}/groups/${groupId}`);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   // Model Options
   getModelOptions: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/options`);
-    return response.data;
+    return apiExtractors.options(response.data);
   },
 
   createOption: async (modelId, optionData) => {
     const response = await apiClient.post(`/models/${modelId}/options`, optionData);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   updateOption: async (modelId, optionId, optionData) => {
     const response = await apiClient.put(`/models/${modelId}/options/${optionId}`, optionData);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   deleteOption: async (modelId, optionId) => {
     const response = await apiClient.delete(`/models/${modelId}/options/${optionId}`);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   // Configurations
@@ -345,22 +374,27 @@ export const modelBuilderApi = {
   // Rules Management
   getModelRules: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/rules`);
-    return response.data;
+    return apiExtractors.rules(response.data);
   },
 
   addRule: async (modelId, ruleData) => {
     const response = await apiClient.post(`/models/${modelId}/rules`, ruleData);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   updateRule: async (modelId, ruleId, ruleData) => {
-    const response = await apiClient.put(`/models/${modelId}/rules/${ruleId}`, ruleData);
-    return response.data;
+    try {
+      const response = await apiClient.put(`/models/${modelId}/rules/${ruleId}`, ruleData);
+      return extractApiData(response.data);
+    } catch (error) {
+      console.error('Error updating rule:', error.response?.data || error);
+      throw error;
+    }
   },
 
   deleteRule: async (modelId, ruleId) => {
     const response = await apiClient.delete(`/models/${modelId}/rules/${ruleId}`);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   validateRule: async (modelId, ruleData) => {
@@ -371,22 +405,22 @@ export const modelBuilderApi = {
   // Pricing Rules
   getPricingRules: async (modelId) => {
     const response = await apiClient.get(`/models/${modelId}/pricing-rules`);
-    return response.data;
+    return apiExtractors.pricingRules(response.data);
   },
 
   createPricingRule: async (modelId, ruleData) => {
     const response = await apiClient.post(`/models/${modelId}/pricing-rules`, ruleData);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   updatePricingRule: async (modelId, ruleId, ruleData) => {
     const response = await apiClient.put(`/models/${modelId}/pricing-rules/${ruleId}`, ruleData);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   deletePricingRule: async (modelId, ruleId) => {
     const response = await apiClient.delete(`/models/${modelId}/pricing-rules/${ruleId}`);
-    return response.data;
+    return extractApiData(response.data);
   },
 
   // Rule Priority Management

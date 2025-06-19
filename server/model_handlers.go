@@ -5,6 +5,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,14 +17,24 @@ import (
 
 // ModelHandlers provides HTTP handlers for model operations
 type ModelHandlers struct {
-	service *CPQService
+	service CPQServiceInterface
 }
 
 // NewModelHandlers creates new model handlers
-func NewModelHandlers(service *CPQService) *ModelHandlers {
+func NewModelHandlers(service CPQServiceInterface) *ModelHandlers {
 	return &ModelHandlers{
 		service: service,
 	}
+}
+
+// getUserID extracts the user ID from the request context
+func getUserID(r *http.Request) string {
+	if claims := r.Context().Value("user_claims"); claims != nil {
+		if tokenClaims, ok := claims.(*TokenClaims); ok {
+			return tokenClaims.Username
+		}
+	}
+	return ""
 }
 
 // setupModelRoutes sets up all model-related routes
@@ -36,12 +47,25 @@ func (s *Server) setupModelRoutes(router *mux.Router) {
 	router.HandleFunc("/{id}", handlers.GetModel).Methods("GET", "OPTIONS")
 	router.HandleFunc("/{id}", handlers.UpdateModel).Methods("PUT", "OPTIONS")
 	router.HandleFunc("/{id}", handlers.DeleteModel).Methods("DELETE", "OPTIONS")
+	router.HandleFunc("/{id}/clone", handlers.CloneModel).Methods("POST", "OPTIONS")
 
 	// Model components
 	router.HandleFunc("/{id}/options", handlers.GetModelOptions).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/options", handlers.CreateOption).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/options/{option_id}", handlers.UpdateOption).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}/options/{option_id}", handlers.DeleteOption).Methods("DELETE", "OPTIONS")
+
 	router.HandleFunc("/{id}/groups", handlers.GetModelGroups).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/groups", handlers.CreateGroup).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/groups/{group_id}", handlers.UpdateGroup).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}/groups/{group_id}", handlers.DeleteGroup).Methods("DELETE", "OPTIONS")
+
 	router.HandleFunc("/{id}/rules", handlers.GetModelRules).Methods("GET", "OPTIONS")
 	router.HandleFunc("/{id}/pricing-rules", handlers.GetPricingRules).Methods("GET", "OPTIONS")
+	router.HandleFunc("/{id}/pricing-rules", handlers.CreatePricingRule).Methods("POST", "OPTIONS")
+	router.HandleFunc("/{id}/pricing-rules/{rule_id}", handlers.UpdatePricingRule).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/{id}/pricing-rules/{rule_id}", handlers.DeletePricingRule).Methods("DELETE", "OPTIONS")
+
 	router.HandleFunc("/{id}/statistics", handlers.GetModelStatistics).Methods("GET", "OPTIONS")
 
 	// Model building tools
@@ -80,7 +104,11 @@ func (h *ModelHandlers) ListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get all models
-	allModels := h.service.ListModels()
+	allModels, err := h.service.ListModels()
+	if err != nil {
+		WriteErrorResponse(w, "LIST_FAILED", "Failed to list models", err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// Apply pagination
 	total := len(allModels)
@@ -138,14 +166,12 @@ func (h *ModelHandlers) CreateModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
+	// Auto-generate ID if not provided
 	if model.ID == "" {
-		WriteValidationErrorResponse(w, map[string]string{
-			"id": "Model ID is required",
-		})
-		return
+		model.ID = fmt.Sprintf("model_%d", time.Now().UnixNano())
 	}
 
+	// Validate required fields
 	if model.Name == "" {
 		WriteValidationErrorResponse(w, map[string]string{
 			"name": "Model name is required",
@@ -153,8 +179,16 @@ func (h *ModelHandlers) CreateModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get userID from context if available (set by auth middleware)
+	userID := ""
+	if claims := r.Context().Value("user_claims"); claims != nil {
+		if tokenClaims, ok := claims.(*TokenClaims); ok {
+			userID = tokenClaims.Username
+		}
+	}
+	
 	// Add model to service
-	if err := h.service.AddModel(&model); err != nil {
+	if err := h.service.AddModel(&model, userID); err != nil {
 		WriteErrorResponse(w, "CREATION_FAILED", "Failed to create model", err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -230,7 +264,7 @@ func (h *ModelHandlers) UpdateModel(w http.ResponseWriter, r *http.Request) {
 	updatedModel.ID = modelID
 
 	// Update model in service
-	if err := h.service.AddModel(&updatedModel); err != nil {
+	if err := h.service.UpdateModel(modelID, &updatedModel); err != nil {
 		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update model", err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -259,7 +293,19 @@ func (h *ModelHandlers) DeleteModel(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	modelID := vars["id"]
 
-	// In production, you'd delete from storage and clean up configurators
+	// Check if model exists first
+	_, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Delete model from service
+	if err := h.service.DeleteModel(modelID); err != nil {
+		WriteErrorResponse(w, "DELETE_FAILED", "Failed to delete model", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	response := map[string]interface{}{
 		"id":         modelID,
 		"deleted":    true,
@@ -269,6 +315,72 @@ func (h *ModelHandlers) DeleteModel(w http.ResponseWriter, r *http.Request) {
 	duration := timer()
 	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
 	WriteSuccessResponse(w, response, meta)
+}
+
+// CloneModel creates a copy of an existing model
+func (h *ModelHandlers) CloneModel(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	vars := mux.Vars(r)
+	modelID := vars["id"]
+
+	// Get the original model
+	originalModel, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Create a clone with a new ID and updated name
+	clonedModel := &cpq.Model{
+		ID:          fmt.Sprintf("%s_clone_%d", originalModel.ID, time.Now().Unix()),
+		Name:        fmt.Sprintf("%s (Clone)", originalModel.Name),
+		Description: originalModel.Description,
+		Version:     "1.0.0", // Reset version for clone
+		Options:     make([]cpq.Option, len(originalModel.Options)),
+		Groups:      make([]cpq.Group, len(originalModel.Groups)),
+		Rules:       make([]cpq.Rule, len(originalModel.Rules)),
+		PriceRules:  make([]cpq.PriceRule, len(originalModel.PriceRules)),
+	}
+
+	// Deep copy options
+	copy(clonedModel.Options, originalModel.Options)
+
+	// Deep copy groups
+	copy(clonedModel.Groups, originalModel.Groups)
+
+	// Deep copy rules
+	copy(clonedModel.Rules, originalModel.Rules)
+
+	// Deep copy pricing rules
+	copy(clonedModel.PriceRules, originalModel.PriceRules)
+
+	// Get userID from context
+	userID := getUserID(r)
+	
+	// Add cloned model to service
+	if err := h.service.AddModel(clonedModel, userID); err != nil {
+		WriteErrorResponse(w, "CLONE_FAILED", "Failed to clone model", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Convert to response format
+	response := ModelResponse{
+		ID:           clonedModel.ID,
+		Name:         clonedModel.Name,
+		Description:  clonedModel.Description,
+		Version:      clonedModel.Version,
+		Options:      clonedModel.Options,
+		Groups:       clonedModel.Groups,
+		Rules:        clonedModel.Rules,
+		PricingRules: clonedModel.PriceRules,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteCreatedResponse(w, response, meta)
 }
 
 // Model Component Operations
@@ -310,10 +422,21 @@ func (h *ModelHandlers) GetModelGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if options should be included
+	includeOptions := r.URL.Query().Get("include") == "options"
+
+	groups := model.Groups
+	if includeOptions {
+		// Populate each group with its options
+		for i := range groups {
+			groups[i].Options = model.GetOptionsInGroup(groups[i].ID)
+		}
+	}
+
 	response := map[string]interface{}{
 		"model_id": modelID,
-		"groups":   model.Groups,
-		"count":    len(model.Groups),
+		"groups":   groups,
+		"count":    len(groups),
 	}
 
 	duration := timer()
@@ -471,7 +594,15 @@ func (h *ModelHandlers) AnalyzeImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	impact, err := h.service.AnalyzeImpact(modelID, req.ChangeType, req.OldRule, req.NewRule)
+	// Convert to RuleChange for the interface
+	ruleChange := RuleChange{
+		Type:    req.ChangeType,
+		OldRule: req.OldRule,
+		NewRule: req.NewRule,
+	}
+	ruleChanges := []RuleChange{ruleChange}
+	
+	impact, err := h.service.AnalyzeImpact(modelID, ruleChanges)
 	if err != nil {
 		WriteErrorResponse(w, "IMPACT_ANALYSIS_FAILED", "Failed to analyze impact", err.Error(), http.StatusBadRequest)
 		return
@@ -499,13 +630,24 @@ func (h *ModelHandlers) ManagePriorities(w http.ResponseWriter, r *http.Request)
 	vars := mux.Vars(r)
 	modelID := vars["id"]
 
-	result, err := h.service.ManagePriorities(modelID)
+	// Get the model to determine rule priorities
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+	
+	// Create an empty priorities map for optimization
+	priorities := make(map[string]int)
+	
+	// Call OptimizePriorities instead of ManagePriorities
+	result, err := h.service.OptimizePriorities(modelID, priorities)
 	if err != nil {
 		WriteErrorResponse(w, "PRIORITY_MANAGEMENT_FAILED", "Failed to manage priorities", err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	summary := fmt.Sprintf("Priority management completed: %d rules processed", result.TotalRules)
+	summary := fmt.Sprintf("Priority management completed: %d rules processed", len(model.Rules))
 
 	response := PriorityResponse{
 		Result:    result,
@@ -631,7 +773,22 @@ func (h *ModelHandlers) AddRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add rule to model (in production, you'd update the stored model)
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Add rule to model
+	model.Rules = append(model.Rules, rule)
+
+	// Update model in service
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "ADD_FAILED", "Failed to add rule", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	response := map[string]interface{}{
 		"model_id": modelID,
 		"rule":     rule,
@@ -647,23 +804,80 @@ func (h *ModelHandlers) AddRule(w http.ResponseWriter, r *http.Request) {
 // UpdateRule updates an existing rule
 func (h *ModelHandlers) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	timer := StartTimer()
+	
+	log.Printf("UpdateRule called for: %s", r.URL.Path)
 
 	vars := mux.Vars(r)
 	modelID := vars["id"]
 	ruleID := vars["rule_id"]
 
-	var rule cpq.Rule
-	if err := ParseJSONRequest(r, &rule); err != nil {
+	// Parse the request body as a map to handle partial updates
+	var updateData map[string]interface{}
+	if err := ParseJSONRequest(r, &updateData); err != nil {
 		WriteBadRequestResponse(w, "Invalid request body")
 		return
 	}
+	
+	log.Printf("Rule update data received: %+v", updateData)
 
-	// Ensure ID matches
-	rule.ID = ruleID
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find the existing rule
+	var existingRule *cpq.Rule
+	for i, rule := range model.Rules {
+		if rule.ID == ruleID {
+			existingRule = &model.Rules[i]
+			break
+		}
+	}
+
+	if existingRule == nil {
+		WriteNotFoundResponse(w, "Rule")
+		return
+	}
+	
+	// Create updated rule starting with existing values
+	updatedRule := *existingRule
+	
+	// Apply partial updates
+	if name, ok := updateData["name"].(string); ok {
+		updatedRule.Name = name
+	}
+	if desc, ok := updateData["description"].(string); ok {
+		updatedRule.Description = desc
+	}
+	if ruleType, ok := updateData["type"].(string); ok {
+		updatedRule.Type = cpq.RuleType(ruleType)
+	}
+	if expression, ok := updateData["expression"].(string); ok {
+		updatedRule.Expression = expression
+	}
+	if message, ok := updateData["message"].(string); ok {
+		updatedRule.Message = message
+	}
+	if priority, ok := updateData["priority"].(float64); ok {
+		updatedRule.Priority = int(priority)
+	}
+	if isActive, ok := updateData["is_active"].(bool); ok {
+		updatedRule.IsActive = isActive
+	}
+	
+	log.Printf("Updated rule: %+v", updatedRule)
+
+	// Update rule using the service method
+	if err := h.service.UpdateRule(modelID, ruleID, &updatedRule); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update rule", err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	response := map[string]interface{}{
 		"model_id":   modelID,
-		"rule":       rule,
+		"rule":       updatedRule,
 		"updated":    true,
 		"updated_at": time.Now().UTC(),
 	}
@@ -680,6 +894,34 @@ func (h *ModelHandlers) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	modelID := vars["id"]
 	ruleID := vars["rule_id"]
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find and remove the rule
+	ruleFound := false
+	for i, rule := range model.Rules {
+		if rule.ID == ruleID {
+			model.Rules = append(model.Rules[:i], model.Rules[i+1:]...)
+			ruleFound = true
+			break
+		}
+	}
+
+	if !ruleFound {
+		WriteNotFoundResponse(w, "Rule")
+		return
+	}
+
+	// Update model in service
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "DELETE_FAILED", "Failed to delete rule", err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	response := map[string]interface{}{
 		"model_id":   modelID,
@@ -779,6 +1021,633 @@ func (h *ModelHandlers) GetRuleConflicts(w http.ResponseWriter, r *http.Request)
 		"conflicts":  conflicts,
 		"count":      len(conflicts),
 		"checked_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteSuccessResponse(w, response, meta)
+}
+
+// Option CRUD Operations
+
+// CreateOption creates a new option for a model
+func (h *ModelHandlers) CreateOption(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	var option cpq.Option
+	if err := ParseJSONRequest(r, &option); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if option.ID == "" {
+		WriteValidationErrorResponse(w, map[string]string{
+			"id": "Option ID is required",
+		})
+		return
+	}
+
+	if option.Name == "" {
+		WriteValidationErrorResponse(w, map[string]string{
+			"name": "Option name is required",
+		})
+		return
+	}
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Add option to model (in production, you'd update the stored model)
+	model.Options = append(model.Options, option)
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to add option", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"option":     option,
+		"created":    true,
+		"created_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteCreatedResponse(w, response, meta)
+}
+
+// UpdateOption updates an existing option
+func (h *ModelHandlers) UpdateOption(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+	
+	log.Printf("UpdateOption called for: %s", r.URL.Path)
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	optionID, err := ExtractPathParam(r, "option_id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing option ID")
+		return
+	}
+
+	// Parse the request body as a map to handle partial updates
+	var updateData map[string]interface{}
+	if err := ParseJSONRequest(r, &updateData); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+	
+	log.Printf("Option update data received: %+v", updateData)
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find the existing option
+	var existingOption *cpq.Option
+	for i, option := range model.Options {
+		if option.ID == optionID {
+			existingOption = &model.Options[i]
+			break
+		}
+	}
+
+	if existingOption == nil {
+		WriteNotFoundResponse(w, "Option")
+		return
+	}
+	
+	// Create updated option starting with existing values
+	updatedOption := *existingOption
+	
+	// Apply partial updates
+	if name, ok := updateData["name"].(string); ok {
+		updatedOption.Name = name
+	}
+	if desc, ok := updateData["description"].(string); ok {
+		updatedOption.Description = desc
+	}
+	if groupID, ok := updateData["group_id"].(string); ok {
+		updatedOption.GroupID = groupID
+	}
+	if basePrice, ok := updateData["base_price"].(float64); ok {
+		updatedOption.BasePrice = basePrice
+	}
+	if price, ok := updateData["price"].(float64); ok {
+		updatedOption.Price = price
+	}
+	if isDefault, ok := updateData["is_default"].(bool); ok {
+		updatedOption.IsDefault = isDefault
+	}
+	if isActive, ok := updateData["is_active"].(bool); ok {
+		updatedOption.IsActive = isActive
+	}
+	if displayOrder, ok := updateData["display_order"].(float64); ok {
+		updatedOption.DisplayOrder = int(displayOrder)
+	}
+	if sku, ok := updateData["sku"].(string); ok {
+		updatedOption.SKU = sku
+	}
+	
+	// Handle attributes as a map
+	if attrs, ok := updateData["attributes"].(map[string]interface{}); ok {
+		updatedOption.Attributes = attrs
+	}
+	
+	log.Printf("Updated option: %+v", updatedOption)
+	
+	// Update option using the service method
+	if err := h.service.UpdateOption(modelID, optionID, &updatedOption); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update option", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"option":     updatedOption,
+		"updated":    true,
+		"updated_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteSuccessResponse(w, response, meta)
+}
+
+// DeleteOption deletes an option from a model
+func (h *ModelHandlers) DeleteOption(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	optionID, err := ExtractPathParam(r, "option_id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing option ID")
+		return
+	}
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find and remove the option
+	optionFound := false
+	for i, option := range model.Options {
+		if option.ID == optionID {
+			model.Options = append(model.Options[:i], model.Options[i+1:]...)
+			optionFound = true
+			break
+		}
+	}
+
+	if !optionFound {
+		WriteNotFoundResponse(w, "Option")
+		return
+	}
+
+	// Update model in service
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"option_id":  optionID,
+		"deleted":    true,
+		"deleted_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteSuccessResponse(w, response, meta)
+}
+
+// Group CRUD Operations
+
+// CreateGroup creates a new group for a model
+func (h *ModelHandlers) CreateGroup(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+	
+	log.Printf("CreateGroup called for model: %s", r.URL.Path)
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	var group cpq.Group
+	if err := ParseJSONRequest(r, &group); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+	
+	log.Printf("Creating group: %+v for model: %s", group, modelID)
+
+	// Validate required fields
+	if group.ID == "" {
+		WriteValidationErrorResponse(w, map[string]string{
+			"id": "Group ID is required",
+		})
+		return
+	}
+
+	if group.Name == "" {
+		WriteValidationErrorResponse(w, map[string]string{
+			"name": "Group name is required",
+		})
+		return
+	}
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Check if group ID already exists
+	for _, existingGroup := range model.Groups {
+		if existingGroup.ID == group.ID {
+			WriteErrorResponse(w, "DUPLICATE_GROUP", "Group with this ID already exists", "", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Set default values if not provided
+	if !group.IsActive {
+		group.IsActive = true
+	}
+	
+	// Add group using service method
+	if err := h.service.AddGroup(modelID, &group); err != nil {
+		WriteErrorResponse(w, "CREATE_FAILED", "Failed to add group", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"group":      group,
+		"created":    true,
+		"created_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteCreatedResponse(w, response, meta)
+}
+
+// UpdateGroup updates an existing group
+func (h *ModelHandlers) UpdateGroup(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+	
+	log.Printf("UpdateGroup called for: %s", r.URL.Path)
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	groupID, err := ExtractPathParam(r, "group_id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing group ID")
+		return
+	}
+
+	// Parse the request body as a map to handle partial updates
+	var updateData map[string]interface{}
+	if err := ParseJSONRequest(r, &updateData); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+	
+	log.Printf("Update data received: %+v", updateData)
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find the existing group
+	var existingGroup *cpq.Group
+	for i := range model.Groups {
+		if model.Groups[i].ID == groupID {
+			existingGroup = &model.Groups[i]
+			break
+		}
+	}
+
+	if existingGroup == nil {
+		WriteNotFoundResponse(w, "Group")
+		return
+	}
+	
+	// Create updated group starting with existing values
+	updatedGroup := *existingGroup
+	
+	// Apply partial updates
+	if name, ok := updateData["name"].(string); ok {
+		updatedGroup.Name = name
+	}
+	if desc, ok := updateData["description"].(string); ok {
+		updatedGroup.Description = desc
+	}
+	if groupType, ok := updateData["type"].(string); ok {
+		updatedGroup.Type = cpq.GroupType(groupType)
+	}
+	if isActive, ok := updateData["is_active"].(bool); ok {
+		updatedGroup.IsActive = isActive
+	}
+	if isRequired, ok := updateData["is_required"].(bool); ok {
+		updatedGroup.IsRequired = isRequired
+	}
+	if minSel, ok := updateData["min_selections"].(float64); ok {
+		updatedGroup.MinSelections = int(minSel)
+	}
+	if maxSel, ok := updateData["max_selections"].(float64); ok {
+		updatedGroup.MaxSelections = int(maxSel)
+	}
+	if order, ok := updateData["display_order"].(float64); ok {
+		updatedGroup.DisplayOrder = int(order)
+	}
+	
+	log.Printf("Updated group: %+v", updatedGroup)
+
+	// Update group using service method
+	if err := h.service.UpdateGroup(modelID, groupID, &updatedGroup); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update group", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"group":      updatedGroup,
+		"updated":    true,
+		"updated_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteSuccessResponse(w, response, meta)
+}
+
+// DeleteGroup deletes a group from a model
+func (h *ModelHandlers) DeleteGroup(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	groupID, err := ExtractPathParam(r, "group_id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing group ID")
+		return
+	}
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Check if group exists
+	groupFound := false
+	for _, group := range model.Groups {
+		if group.ID == groupID {
+			groupFound = true
+			break
+		}
+	}
+
+	if !groupFound {
+		WriteNotFoundResponse(w, "Group")
+		return
+	}
+
+	// Delete group using service method
+	if err := h.service.DeleteGroup(modelID, groupID); err != nil {
+		WriteErrorResponse(w, "DELETE_FAILED", "Failed to delete group", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"group_id":   groupID,
+		"deleted":    true,
+		"deleted_at": time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteSuccessResponse(w, response, meta)
+}
+
+// Pricing Rule CRUD Operations
+
+// CreatePricingRule creates a new pricing rule for a model
+func (h *ModelHandlers) CreatePricingRule(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	var rule cpq.PriceRule
+	if err := ParseJSONRequest(r, &rule); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if rule.ID == "" {
+		WriteValidationErrorResponse(w, map[string]string{
+			"id": "Pricing rule ID is required",
+		})
+		return
+	}
+
+	if rule.Name == "" {
+		WriteValidationErrorResponse(w, map[string]string{
+			"name": "Pricing rule name is required",
+		})
+		return
+	}
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Add pricing rule to model
+	model.PriceRules = append(model.PriceRules, rule)
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to add pricing rule", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":     modelID,
+		"pricing_rule": rule,
+		"created":      true,
+		"created_at":   time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteCreatedResponse(w, response, meta)
+}
+
+// UpdatePricingRule updates an existing pricing rule
+func (h *ModelHandlers) UpdatePricingRule(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	ruleID, err := ExtractPathParam(r, "rule_id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing rule ID")
+		return
+	}
+
+	var updatedRule cpq.PriceRule
+	if err := ParseJSONRequest(r, &updatedRule); err != nil {
+		WriteBadRequestResponse(w, "Invalid request body")
+		return
+	}
+
+	// Ensure ID matches
+	updatedRule.ID = ruleID
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find and update the pricing rule
+	ruleFound := false
+	for i, rule := range model.PriceRules {
+		if rule.ID == ruleID {
+			model.PriceRules[i] = updatedRule
+			ruleFound = true
+			break
+		}
+	}
+
+	if !ruleFound {
+		WriteNotFoundResponse(w, "Pricing rule")
+		return
+	}
+
+	// Update model in service
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":     modelID,
+		"pricing_rule": updatedRule,
+		"updated":      true,
+		"updated_at":   time.Now().UTC(),
+	}
+
+	duration := timer()
+	meta := CreateMetadata(r.Header.Get("X-Request-ID"), duration)
+	WriteSuccessResponse(w, response, meta)
+}
+
+// DeletePricingRule deletes a pricing rule from a model
+func (h *ModelHandlers) DeletePricingRule(w http.ResponseWriter, r *http.Request) {
+	timer := StartTimer()
+
+	modelID, err := ExtractPathParam(r, "id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing model ID")
+		return
+	}
+
+	ruleID, err := ExtractPathParam(r, "rule_id")
+	if err != nil {
+		WriteBadRequestResponse(w, "Missing rule ID")
+		return
+	}
+
+	// Get the model
+	model, err := h.service.GetModel(modelID)
+	if err != nil {
+		WriteNotFoundResponse(w, "Model")
+		return
+	}
+
+	// Find and remove the pricing rule
+	ruleFound := false
+	for i, rule := range model.PriceRules {
+		if rule.ID == ruleID {
+			model.PriceRules = append(model.PriceRules[:i], model.PriceRules[i+1:]...)
+			ruleFound = true
+			break
+		}
+	}
+
+	if !ruleFound {
+		WriteNotFoundResponse(w, "Pricing rule")
+		return
+	}
+
+	// Update model in service
+	if err := h.service.UpdateModel(modelID, model); err != nil {
+		WriteErrorResponse(w, "UPDATE_FAILED", "Failed to update", err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := map[string]interface{}{
+		"model_id":   modelID,
+		"rule_id":    ruleID,
+		"deleted":    true,
+		"deleted_at": time.Now().UTC(),
 	}
 
 	duration := timer()

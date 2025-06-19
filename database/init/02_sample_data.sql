@@ -45,8 +45,8 @@ INSERT INTO options (id, model_id, group_id, name, description, base_price, cate
 
 -- Create constraint rules
 INSERT INTO rules (id, model_id, name, description, type, expression, message, priority) VALUES 
-('rule_cpu_ram_compatibility', 'sample-laptop', 'CPU-RAM Compatibility', 'High-end CPU requires sufficient RAM', 'requires', 'opt_cpu_high -> opt_ram_16gb OR opt_ram_32gb', 'Intel i7 processor requires at least 16GB RAM for optimal performance', 100),
-('rule_storage_performance', 'sample-laptop', 'Storage Performance', 'High-end CPU should have adequate storage', 'requires', 'opt_cpu_high -> opt_ssd_512gb OR opt_ssd_1tb', 'High-performance processor works best with 512GB+ storage', 90),
+('rule_cpu_ram_compatibility', 'sample-laptop', 'CPU-RAM Compatibility', 'High-end CPU requires sufficient RAM', 'requires', 'opt_cpu_high -> (opt_ram_16gb OR opt_ram_32gb)', 'Intel i7 processor requires at least 16GB RAM for optimal performance', 100),
+('rule_storage_performance', 'sample-laptop', 'Storage Performance', 'High-end CPU should have adequate storage', 'requires', 'opt_cpu_high -> (opt_ssd_512gb OR opt_ssd_1tb)', 'High-performance processor works best with 512GB+ storage', 90),
 ('rule_monitor_space', 'sample-laptop', 'Monitor Workspace', 'Monitor requires keyboard for productive setup', 'requires', 'opt_monitor -> opt_keyboard', 'External monitor works best with a full-size keyboard', 80);
 
 -- Create pricing rules

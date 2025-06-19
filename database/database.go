@@ -203,14 +203,20 @@ func (db *DB) CreateConfiguration(config *cpq.Configuration, userID *string) err
 		uid = *userID
 	}
 
-	_, err := db.Exec(`
-		INSERT INTO configurations (id, model_id, user_id is_valid, total_price, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, config.ID, config.ModelID, uid, config.IsValid, config.TotalPrice, "draft")
+	// Let PostgreSQL generate the UUID
+	var id string
+	err := db.QueryRow(`
+		INSERT INTO configurations (model_id, user_id, is_valid, total_price, status)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id
+	`, config.ModelID, uid, config.IsValid, config.TotalPrice, "draft").Scan(&id)
 
 	if err != nil {
 		return fmt.Errorf("failed to create configuration: %w", err)
 	}
+
+	// Update the config with the generated ID
+	config.ID = id
 
 	return nil
 }
@@ -283,8 +289,8 @@ func (db *DB) AddSelection(configID, optionID string, quantity int) error {
 
 func (db *DB) getModelGroups(modelID string) ([]cpq.Group, error) {
 	rows, err := db.Query(`
-		SELECT id, name, description, type, min_selections, max_selections, display_order
-		FROM groups WHERE model_id = $1 AND is_active = true ORDER BY display_order
+		SELECT id, name, description, type, min_selections, max_selections, display_order, is_active, is_required
+		FROM groups WHERE model_id = $1 ORDER BY display_order
 	`, modelID)
 	if err != nil {
 		return nil, err
@@ -298,6 +304,7 @@ func (db *DB) getModelGroups(modelID string) ([]cpq.Group, error) {
 		err := rows.Scan(
 			&group.ID, &group.Name, &group.Description, &group.Type,
 			&group.MinSelections, &maxSelections, &group.DisplayOrder,
+			&group.IsActive, &group.IsRequired,
 		)
 		if err != nil {
 			return nil, err
@@ -313,8 +320,8 @@ func (db *DB) getModelGroups(modelID string) ([]cpq.Group, error) {
 
 func (db *DB) getModelOptions(modelID string) ([]cpq.Option, error) {
 	rows, err := db.Query(`
-		SELECT id, group_id, name, description, base_price, sku, display_order
-		FROM options WHERE model_id = $1 AND is_active = true ORDER BY display_order
+		SELECT id, group_id, name, description, base_price, sku, display_order, is_active
+		FROM options WHERE model_id = $1 ORDER BY display_order
 	`, modelID)
 	if err != nil {
 		return nil, err
@@ -327,12 +334,14 @@ func (db *DB) getModelOptions(modelID string) ([]cpq.Option, error) {
 		var sku sql.NullString
 		err := rows.Scan(
 			&option.ID, &option.GroupID, &option.Name, &option.Description,
-			&option.BasePrice, &sku, &option.DisplayOrder,
+			&option.BasePrice, &sku, &option.DisplayOrder, &option.IsActive,
 		)
 		if err != nil {
 			return nil, err
 		}
-		option.IsActive = true
+		if sku.Valid {
+			option.SKU = sku.String
+		}
 		options = append(options, option)
 	}
 
@@ -341,8 +350,8 @@ func (db *DB) getModelOptions(modelID string) ([]cpq.Option, error) {
 
 func (db *DB) getModelRules(modelID string) ([]cpq.Rule, error) {
 	rows, err := db.Query(`
-		SELECT id, name, description, type, expression, message, priority
-		FROM rules WHERE model_id = $1 AND is_active = true ORDER BY priority DESC
+		SELECT id, name, description, type, expression, message, priority, is_active
+		FROM rules WHERE model_id = $1 ORDER BY priority DESC
 	`, modelID)
 	if err != nil {
 		return nil, err
@@ -355,15 +364,17 @@ func (db *DB) getModelRules(modelID string) ([]cpq.Rule, error) {
 		var description, message sql.NullString
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &description, &rule.Type,
-			&rule.Expression, &message, &rule.Priority,
+			&rule.Expression, &message, &rule.Priority, &rule.IsActive,
 		)
 		if err != nil {
 			return nil, err
 		}
+		if description.Valid {
+			rule.Description = description.String
+		}
 		if message.Valid {
 			rule.Message = message.String
 		}
-		rule.IsActive = true
 		rules = append(rules, rule)
 	}
 
@@ -438,37 +449,37 @@ func (db *DB) updateConfigurationTotalPrice(configID string) error {
 // Transaction helper methods
 func (db *DB) insertGroup(tx *sql.Tx, modelID string, group cpq.Group) error {
 	_, err := tx.Exec(`
-		INSERT INTO groups (id, model_id, name, description, type, min_selections, max_selections, display_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO groups (id, model_id, name, description, type, min_selections, max_selections, display_order, is_active, is_required)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, group.ID, modelID, group.Name, group.Description, group.Type,
-		group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder)
+		group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, group.IsActive, group.IsRequired)
 	return err
 }
 
 func (db *DB) insertOption(tx *sql.Tx, modelID string, option cpq.Option) error {
 	_, err := tx.Exec(`
-		INSERT INTO options (id, model_id, group_id, name, description, base_price, display_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO options (id, model_id, group_id, name, description, base_price, display_order, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, option.ID, modelID, option.GroupID, option.Name, option.Description,
-		option.BasePrice, option.DisplayOrder)
+		option.BasePrice, option.DisplayOrder, option.IsActive)
 	return err
 }
 
 func (db *DB) insertRule(tx *sql.Tx, modelID string, rule cpq.Rule) error {
 	_, err := tx.Exec(`
-		INSERT INTO rules (id, model_id, name, type, expression, message, priority)
+		INSERT INTO rules (id, model_id, name, type, expression, message, priority, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, rule.ID, modelID, rule.Name, rule.Type,
-		rule.Expression, rule.Message, rule.Priority)
+		rule.Expression, rule.Message, rule.Priority, rule.IsActive)
 	return err
 }
 
 func (db *DB) insertPricingRule(tx *sql.Tx, modelID string, priceRule cpq.PriceRule) error {
 	_, err := tx.Exec(`
-		INSERT INTO pricing_rules (id, model_id, name, type, expression, discount_percent, priority)
+		INSERT INTO pricing_rules (id, model_id, name, type, expression, discount_percent, priority, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, priceRule.ID, modelID, priceRule.Name, priceRule.Type,
-		priceRule.Expression, 0, priceRule.Priority) // Convert decimal to percentage
+		priceRule.Expression, priceRule.DiscountValue, priceRule.Priority, priceRule.IsActive)
 	return err
 }
 

@@ -61,13 +61,13 @@ type Server struct {
 	router      *mux.Router
 	server      *http.Server
 	config      *ServerConfig
-	cpqService  *CPQService
+	cpqService  CPQServiceInterface
 	authService AuthService
 	startTime   time.Time
 }
 
 // NewServer creates a new server instance with optional authentication
-func NewServer(config *ServerConfig, cpqService *CPQService, authService AuthService) (*Server, error) {
+func NewServer(config *ServerConfig, cpqService CPQServiceInterface, authService AuthService) (*Server, error) {
 	if config == nil {
 		config = DefaultServerConfig()
 	}
@@ -105,10 +105,16 @@ func (s *Server) setupMiddleware() {
 	// CORS middleware
 	if s.config.EnableCORS {
 		c := cors.New(cors.Options{
-			AllowedOrigins:   []string{"*"}, // Configure for production
+			AllowedOrigins:   []string{
+				"http://localhost:3000",  // React dev server
+				"http://localhost:3001",  // Alternative React port
+				"http://127.0.0.1:3000",  // Alternative localhost
+				"http://127.0.0.1:3001",  // Alternative localhost
+			},
 			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Request-ID"},
+			AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Request-ID", "X-Requested-With"},
 			AllowCredentials: true,
+			MaxAge:           300, // Cache preflight for 5 minutes
 		})
 		s.router.Use(c.Handler)
 	}
@@ -196,6 +202,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if auth service is available
+	if s.authService == nil {
+		WriteErrorResponse(w, "AUTH_UNAVAILABLE", "Authentication service is not available", "", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Demo authentication
 	if s.authenticateUser(loginReq.Username, loginReq.Password) {
 		token, err := s.authService.GenerateToken(loginReq.Username)
@@ -251,6 +263,12 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 			WriteBadRequestResponse(w, "Token required in request body or Authorization header")
 			return
 		}
+	}
+
+	// Check if auth service is available
+	if s.authService == nil {
+		WriteErrorResponse(w, "AUTH_UNAVAILABLE", "Authentication service is not available", "", http.StatusServiceUnavailable)
+		return
 	}
 
 	claims, err := s.authService.ValidateToken(tokenReq.Token)
@@ -349,6 +367,13 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
 	timer := StartTimer()
 
+	// Get models count
+	models, err := s.cpqService.ListModels()
+	modelsCount := 0
+	if err == nil {
+		modelsCount = len(models)
+	}
+
 	status := map[string]interface{}{
 		"server": map[string]interface{}{
 			"uptime": time.Since(s.startTime).String(),
@@ -356,7 +381,7 @@ func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
 			"cors":   s.config.EnableCORS,
 		},
 		"cpq": map[string]interface{}{
-			"models_loaded": len(s.cpqService.ListModels()),
+			"models_loaded": modelsCount,
 			"status":        "operational",
 		},
 		"timestamp": time.Now().UTC(),

@@ -14,11 +14,11 @@ import (
 
 // PricingHandlers provides HTTP handlers for pricing operations
 type PricingHandlers struct {
-	service *CPQService
+	service CPQServiceInterface
 }
 
 // NewPricingHandlers creates new pricing handlers
-func NewPricingHandlers(service *CPQService) *PricingHandlers {
+func NewPricingHandlers(service CPQServiceInterface) *PricingHandlers {
 	return &PricingHandlers{
 		service: service,
 	}
@@ -101,8 +101,16 @@ func (h *PricingHandlers) CalculatePrice(w http.ResponseWriter, r *http.Request)
 		pricing = h.applyCustomerPricing(pricing, req.CustomerID, req.Context)
 	}
 
+	// Convert to PricingResult
+	pricingResult := &cpq.PricingResult{
+		BasePrice:   pricing.BasePrice,
+		Adjustments: pricing.Adjustments,
+		TotalPrice:  pricing.TotalPrice,
+		Breakdown:   &pricing,
+	}
+
 	response := &PricingResponse{
-		Breakdown: &pricing,
+		Breakdown: pricingResult,
 		Total:     pricing.TotalPrice,
 		Currency:  "USD",
 		Timestamp: time.Now().UTC(),

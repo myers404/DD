@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'react-hot-toast';
 import { 
   ShieldCheckIcon,
   ExclamationTriangleIcon,
@@ -12,185 +13,33 @@ import {
   AdjustmentsHorizontalIcon,
   StarIcon
 } from '@heroicons/react/24/outline';
+import { modelBuilderApi } from '../../services/api';
+import { ensureArray } from '../../utils/arrayUtils';
 
 const ModelValidation = ({ modelId, onValidationComplete = () => {} }) => {
   const [validation, setValidation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  // Sample validation data for demo
-  const sampleValidation = {
-    modelId: 'model-123',
-    validationDate: new Date().toISOString(),
-    overallStatus: 'warning',
-    qualityScore: 78,
-    totalErrors: 5,
-    totalWarnings: 12,
-    totalInfo: 3,
-    
-    categories: {
-      idReferences: {
-        name: 'ID References',
-        status: 'error',
-        errors: 2,
-        warnings: 1,
-        info: 0,
-        description: 'Validates that all referenced IDs exist'
-      },
-      circularDependencies: {
-        name: 'Circular Dependencies',
-        status: 'success',
-        errors: 0,
-        warnings: 0,
-        info: 1,
-        description: 'Checks for circular dependency chains'
-      },
-      rulePriorities: {
-        name: 'Rule Priorities',
-        status: 'warning',
-        errors: 1,
-        warnings: 4,
-        info: 0,
-        description: 'Validates rule priority assignments'
-      },
-      groupConstraints: {
-        name: 'Group Constraints',
-        status: 'warning',
-        errors: 2,
-        warnings: 3,
-        info: 1,
-        description: 'Checks group constraint feasibility'
-      },
-      pricingRules: {
-        name: 'Pricing Rules',
-        status: 'warning',
-        errors: 0,
-        warnings: 4,
-        info: 1,
-        description: 'Validates pricing rule consistency'
-      },
-      expressions: {
-        name: 'Expression Syntax',
-        status: 'success',
-        errors: 0,
-        warnings: 0,
-        info: 0,
-        description: 'Checks expression syntax validity'
-      }
-    },
-
-    errors: [
-      {
-        id: 'error-1',
-        category: 'idReferences',
-        severity: 'error',
-        message: 'Option ID "opt_nonexistent" referenced in rule but not found in model',
-        affectedIds: ['rule-123'],
-        context: 'Rule: Premium CPU Requirements',
-        suggestion: 'Add the missing option or update the rule expression'
-      },
-      {
-        id: 'error-2',
-        category: 'idReferences',
-        severity: 'error',
-        message: 'Group ID "grp_missing" referenced but does not exist',
-        affectedIds: ['rule-456'],
-        context: 'Rule: Storage Configuration',
-        suggestion: 'Create the missing group or remove the reference'
-      },
-      {
-        id: 'error-3',
-        category: 'rulePriorities',
-        severity: 'error',
-        message: 'Duplicate priority 100 assigned to multiple rules',
-        affectedIds: ['rule-789', 'rule-012'],
-        context: 'Rule Priority Management',
-        suggestion: 'Assign unique priorities to ensure predictable execution order'
-      },
-      {
-        id: 'error-4',
-        category: 'groupConstraints',
-        severity: 'error',
-        message: 'Single-select group has no available options',
-        affectedIds: ['grp-empty'],
-        context: 'Group: Display Options',
-        suggestion: 'Add at least one option to the single-select group'
-      },
-      {
-        id: 'error-5',
-        category: 'groupConstraints',
-        severity: 'error',
-        message: 'Multi-select group requires more selections than available options',
-        affectedIds: ['grp-impossible'],
-        context: 'Group: Storage Configuration',
-        suggestion: 'Reduce minimum selections or add more options'
-      }
-    ],
-
-    warnings: [
-      {
-        id: 'warning-1',
-        category: 'idReferences',
-        severity: 'warning',
-        message: 'Option "opt_deprecated" is referenced but marked as inactive',
-        affectedIds: ['rule-legacy'],
-        context: 'Legacy rule dependencies',
-        suggestion: 'Update rule to use active options or reactivate the option'
-      },
-      {
-        id: 'warning-2',
-        category: 'rulePriorities',
-        severity: 'warning',
-        message: 'Large gap in priority sequence (100 to 500)',
-        affectedIds: ['rule-gap1', 'rule-gap2'],
-        context: 'Priority management',
-        suggestion: 'Consider adjusting priorities for better organization'
-      }
-    ],
-
-    recommendations: [
-      'Fix all ID reference errors before deploying to production',
-      'Review and reorganize rule priorities for better maintainability',
-      'Consider adding more options to groups with limited choices',
-      'Update deprecated option references in legacy rules',
-      'Run validation regularly during model development'
-    ],
-
-    qualityMetrics: {
-      complexity: {
-        score: 72,
-        label: 'Model Complexity',
-        description: 'Overall complexity of the model structure'
-      },
-      maintainability: {
-        score: 85,
-        label: 'Maintainability',
-        description: 'How easy the model is to maintain and modify'
-      },
-      consistency: {
-        score: 68,
-        label: 'Consistency',
-        description: 'Consistency of naming and structure patterns'
-      },
-      completeness: {
-        score: 91,
-        label: 'Completeness',
-        description: 'Coverage of business requirements'
-      }
-    }
-  };
-
   const runValidation = async () => {
+    if (!modelId) {
+      toast.error('No model ID provided');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Simulate API call
-      setTimeout(() => {
-        setValidation(sampleValidation);
-        setLoading(false);
-        onValidationComplete(sampleValidation);
-      }, 2000);
+      // Use real API call for model validation
+      const response = await modelBuilderApi.getModelQuality(modelId);
+      const validationData = response.data || response;
+      
+      setValidation(validationData);
+      onValidationComplete(validationData);
+      toast.success('Model validation completed');
     } catch (error) {
-      console.error('Failed to run validation:', error);
+      toast.error(error.message || 'Failed to run validation');
+      setValidation(null);
+    } finally {
       setLoading(false);
     }
   };
@@ -234,8 +83,8 @@ const ModelValidation = ({ modelId, onValidationComplete = () => {} }) => {
   };
 
   const filteredIssues = validation ? [
-    ...validation.errors.filter(e => selectedCategory === 'all' || e.category === selectedCategory),
-    ...validation.warnings.filter(w => selectedCategory === 'all' || w.category === selectedCategory)
+    ...ensureArray(validation.errors).filter(e => selectedCategory === 'all' || e.category === selectedCategory),
+    ...ensureArray(validation.warnings).filter(w => selectedCategory === 'all' || w.category === selectedCategory)
   ] : [];
 
   return (
@@ -285,8 +134,8 @@ const ModelValidation = ({ modelId, onValidationComplete = () => {} }) => {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-3">
                 <ShieldCheckIcon className={`w-8 h-8 ${
-                  validation.overallStatus === 'success' ? 'text-green-500' :
-                  validation.overallStatus === 'warning' ? 'text-yellow-500' :
+                  validation?.overallStatus === 'success' ? 'text-green-500' :
+                  validation?.overallStatus === 'warning' ? 'text-yellow-500' :
                   'text-red-500'
                 }`} />
                 <div>
@@ -446,7 +295,7 @@ const ModelValidation = ({ modelId, onValidationComplete = () => {} }) => {
                           <span className="font-medium">Context:</span> {issue.context}
                         </p>
                         <p className="text-sm text-gray-600 mb-2">
-                          <span className="font-medium">Affected:</span> {issue.affectedIds.join(', ')}
+                          <span className="font-medium">Affected:</span> {ensureArray(issue.affectedIds).join(', ')}
                         </p>
                         <div className="bg-white border border-gray-200 rounded p-3 mt-3">
                           <p className="text-sm text-blue-800">
@@ -474,7 +323,7 @@ const ModelValidation = ({ modelId, onValidationComplete = () => {} }) => {
               Recommendations
             </h4>
             <ul className="space-y-2">
-              {validation.recommendations.map((recommendation, index) => (
+              {ensureArray(validation.recommendations).map((recommendation, index) => (
                 <li key={index} className="flex items-start">
                   <span className="flex-shrink-0 w-1.5 h-1.5 bg-green-500 rounded-full mt-2 mr-3"></span>
                   <span className="text-gray-700">{recommendation}</span>

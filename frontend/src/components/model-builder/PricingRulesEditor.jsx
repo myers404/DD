@@ -21,6 +21,7 @@ import {
 import { modelBuilderApi } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import Modal from '../common/Modal';
+import { ensureArray } from '../../utils/arrayUtils';
 
 const PricingRulesEditor = ({ modelId, onUpdate }) => {
   const queryClient = useQueryClient();
@@ -30,11 +31,10 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    type: 'fixed',
-    value: 0,
-    conditions: [],
+    type: 'volume_tier',
+    expression: '',
     priority: 50,
-    active: true
+    is_active: true
   });
 
   // Fetch pricing rules
@@ -90,11 +90,10 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
     setFormData({
       name: '',
       description: '',
-      type: 'fixed',
-      value: 0,
-      conditions: [],
+      type: 'volume_tier',
+      expression: '',
       priority: 50,
-      active: true
+      is_active: true
     });
   };
 
@@ -103,8 +102,8 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
       toast.error('Rule name is required');
       return;
     }
-    if (formData.value === null || formData.value === '') {
-      toast.error('Rule value is required');
+    if (!formData.expression.trim()) {
+      toast.error('Rule expression is required');
       return;
     }
     createMutation.mutate(formData);
@@ -115,8 +114,8 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
       toast.error('Rule name is required');
       return;
     }
-    if (formData.value === null || formData.value === '') {
-      toast.error('Rule value is required');
+    if (!formData.expression.trim()) {
+      toast.error('Rule expression is required');
       return;
     }
     updateMutation.mutate({ ruleId: selectedRule.id, data: formData });
@@ -127,11 +126,10 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
     setFormData({
       name: rule.name,
       description: rule.description || '',
-      type: rule.type || 'fixed',
-      value: rule.value || 0,
-      conditions: rule.conditions || [],
+      type: rule.type || 'volume_tier',
+      expression: rule.expression || '',
       priority: rule.priority || 50,
-      active: rule.active !== false
+      is_active: rule.is_active !== false
     });
     setShowEditModal(true);
   };
@@ -144,19 +142,20 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
 
   const getRuleTypeInfo = (type) => {
     const types = {
-      fixed: { label: 'Fixed Amount', icon: CurrencyDollarIcon, color: 'blue' },
-      percentage: { label: 'Percentage', icon: TagIcon, color: 'green' },
-      volume: { label: 'Volume Based', icon: ChartBarIcon, color: 'purple' },
-      conditional: { label: 'Conditional', icon: CalculatorIcon, color: 'orange' }
+      volume_tier: { label: 'Volume Tier', icon: ChartBarIcon, color: 'purple' },
+      fixed_discount: { label: 'Fixed Discount', icon: CurrencyDollarIcon, color: 'blue' },
+      percent_discount: { label: 'Percent Discount', icon: TagIcon, color: 'green' },
+      surcharge: { label: 'Surcharge', icon: CalculatorIcon, color: 'orange' },
+      bundle: { label: 'Bundle', icon: BeakerIcon, color: 'indigo' }
     };
-    return types[type] || types.fixed;
+    return types[type] || types.volume_tier;
   };
 
-  const formatValue = (rule) => {
-    if (rule.type === 'percentage') {
-      return `${rule.value}%`;
+  const formatExpression = (rule) => {
+    if (!rule || !rule.expression) {
+      return 'No expression';
     }
-    return `$${rule.value.toFixed(2)}`;
+    return rule.expression;
   };
 
   // Rule Form Component
@@ -176,37 +175,39 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
           />
         </div>
 
-        {/* Type and Value */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Type *
-            </label>
-            <select
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="fixed">Fixed Amount</option>
-              <option value="percentage">Percentage</option>
-              <option value="volume">Volume Based</option>
-              <option value="conditional">Conditional</option>
-            </select>
-          </div>
+        {/* Type */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Type *
+          </label>
+          <select
+              value={formData.type}
+              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="volume_tier">Volume Tier</option>
+            <option value="fixed_discount">Fixed Discount</option>
+            <option value="percent_discount">Percent Discount</option>
+            <option value="surcharge">Surcharge</option>
+            <option value="bundle">Bundle</option>
+          </select>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Value *
-            </label>
-            <input
-                type="number"
-                value={formData.value}
-                onChange={(e) => setFormData({ ...formData, value: parseFloat(e.target.value) || 0 })}
-                step={formData.type === 'percentage' ? '0.01' : '0.01'}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder={formData.type === 'percentage' ? '10' : '99.99'}
-            />
-          </div>
+        {/* Expression */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Expression *
+          </label>
+          <input
+              type="text"
+              value={formData.expression}
+              onChange={(e) => setFormData({ ...formData, expression: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="e.g., accessory_count >= 5 or discount_percent = 10"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Enter the pricing rule expression (e.g., "quantity &gt;= 10" or "discount_percent = 15")
+          </p>
         </div>
 
         {/* Description */}
@@ -244,8 +245,8 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
             <label className="flex items-center cursor-pointer">
               <input
                   type="checkbox"
-                  checked={formData.active}
-                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
                   className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               />
               <span className="ml-2 text-sm font-medium text-gray-700">Active</span>
@@ -291,7 +292,7 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
         {/* Rules List */}
         <div className="space-y-4">
           <AnimatePresence mode="popLayout">
-            {rules.map((rule) => {
+            {ensureArray(rules).map((rule) => {
               const typeInfo = getRuleTypeInfo(rule.type);
 
               return (
@@ -311,10 +312,10 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
                           <span className={`px-2 py-1 text-xs font-medium rounded-full bg-${typeInfo.color}-100 text-${typeInfo.color}-800`}>
                         {typeInfo.label}
                       </span>
-                          <span className="text-lg font-semibold text-gray-900">
-                        {formatValue(rule)}
+                          <span className="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                        {formatExpression(rule)}
                       </span>
-                          {!rule.active && (
+                          {!rule.is_active && (
                               <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
                           Inactive
                         </span>
@@ -327,9 +328,7 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
 
                         <div className="flex items-center gap-4 text-xs text-gray-500">
                           <span>Priority: {rule.priority}</span>
-                          {rule.conditions?.length > 0 && (
-                              <span>{rule.conditions.length} conditions</span>
-                          )}
+                          <span>Type: {rule.type}</span>
                         </div>
                       </div>
 
@@ -357,7 +356,7 @@ const PricingRulesEditor = ({ modelId, onUpdate }) => {
         </div>
 
         {/* Empty State */}
-        {rules.length === 0 && (
+        {ensureArray(rules).length === 0 && (
             <div className="text-center py-12 bg-gray-50 rounded-lg">
               <CurrencyDollarIcon className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-2 text-lg font-medium text-gray-900">No Pricing Rules</h3>

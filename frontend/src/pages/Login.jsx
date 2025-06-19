@@ -17,7 +17,7 @@ import LoadingSpinner from '../components/common/LoadingSpinner';
 const Login = () => {
   const { login, isAuthenticated, isLoading } = useAuth();
   const [formData, setFormData] = useState({
-    username: '',
+    email: '',
     password: ''
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -40,15 +40,15 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.username || !formData.password) {
-      toast.error('Please enter both username and password');
+    if (!formData.email || !formData.password) {
+      toast.error('Please enter both email and password');
       return;
     }
 
     setLoginLoading(true);
 
     try {
-      const result = await login(formData.username, formData.password);
+      const result = await login(formData.email, formData.password);
 
       if (result.success) {
         toast.success('Login successful!');
@@ -110,8 +110,8 @@ const Login = () => {
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-blue-800">Demo Credentials</h3>
                 <div className="mt-1 text-sm text-blue-700">
-                  <p><strong>Username:</strong> admin</p>
-                  <p><strong>Password:</strong> admin123</p>
+                  <p><strong>Email:</strong> demo@cpq.local</p>
+                  <p><strong>Password:</strong> demo123</p>
                 </div>
               </div>
             </div>
@@ -126,20 +126,20 @@ const Login = () => {
               onSubmit={handleSubmit}
           >
             <div className="space-y-4">
-              {/* Username Field */}
+              {/* Email Field */}
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-                  Username
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                  Email
                 </label>
                 <input
-                    id="username"
-                    name="username"
-                    type="text"
+                    id="email"
+                    name="email"
+                    type="email"
                     required
-                    value={formData.username}
+                    value={formData.email}
                     onChange={handleInputChange}
                     className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter your username"
+                    placeholder="Enter your email"
                     disabled={loginLoading}
                 />
               </div>

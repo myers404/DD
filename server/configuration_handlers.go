@@ -14,11 +14,11 @@ import (
 
 // ConfigurationHandlers provides HTTP handlers for configuration operations
 type ConfigurationHandlers struct {
-	service *CPQService
+	service CPQServiceInterface
 }
 
 // NewConfigurationHandlers creates new configuration handlers
-func NewConfigurationHandlers(service *CPQService) *ConfigurationHandlers {
+func NewConfigurationHandlers(service CPQServiceInterface) *ConfigurationHandlers {
 	return &ConfigurationHandlers{
 		service: service,
 	}
@@ -77,7 +77,15 @@ func (h *ConfigurationHandlers) CreateConfiguration(w http.ResponseWriter, r *ht
 	}
 
 	// Create configuration
-	config, err := h.service.CreateConfiguration(req.ModelID)
+	// Get userID from context if available (set by auth middleware)
+	var userID *string
+	if claims := r.Context().Value("user_claims"); claims != nil {
+		if tokenClaims, ok := claims.(*TokenClaims); ok {
+			userID = &tokenClaims.Username
+		}
+	}
+	
+	config, err := h.service.CreateConfiguration(req.ModelID, userID)
 	if err != nil {
 		WriteErrorResponse(w, "CREATION_FAILED", "Failed to create configuration", err.Error(), http.StatusBadRequest)
 		return
@@ -122,8 +130,8 @@ func (h *ConfigurationHandlers) GetConfiguration(w http.ResponseWriter, r *http.
 	}
 
 	// Get current configuration from configurator
-	configurator, exists := h.service.configurators[modelID]
-	if !exists {
+	configurator, err := h.service.GetConfigurator(modelID)
+	if err != nil {
 		WriteNotFoundResponse(w, "Model")
 		return
 	}
@@ -347,8 +355,8 @@ func (h *ConfigurationHandlers) GetConfigurationSummary(w http.ResponseWriter, r
 	}
 
 	// Get configurator
-	configurator, exists := h.service.configurators[modelID]
-	if !exists {
+	configurator, err := h.service.GetConfigurator(modelID)
+	if err != nil {
 		WriteNotFoundResponse(w, "Model")
 		return
 	}
@@ -631,8 +639,8 @@ func (h *ConfigurationHandlers) ValidateSelection(w http.ResponseWriter, r *http
 	}
 
 	// Get configurator
-	configurator, exists := h.service.configurators[req.ModelID]
-	if !exists {
+	configurator, err := h.service.GetConfigurator(req.ModelID)
+	if err != nil {
 		WriteNotFoundResponse(w, "Model")
 		return
 	}

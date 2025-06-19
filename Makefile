@@ -71,7 +71,7 @@ logs:
 db-connect:
 	@echo "🗄️  Connecting to PostgreSQL database..."
 	@echo "Password: cpq_password"
-	psql -h localhost -p 5432 -U cpq_user -d cpq_db
+	psql -h localhost -p 5432 -U cpq_user -d cpq_system
 
 db-reset:
 	@echo "⚠️  WARNING: This will destroy all data!"

@@ -1,7 +1,11 @@
 // web/src/lib/api/client.js
 class ConfiguratorApiClient {
   constructor(baseUrl, options = {}) {
-    this.baseUrl = baseUrl || window.__API_BASE_URL__ || 'http://localhost:8080/api/v1';
+    // Use relative URL when running in dev mode to leverage Vite proxy
+    const defaultUrl = window.location.hostname === 'localhost' && window.location.port === '5173' 
+      ? '/api/v1' 
+      : 'http://localhost:8080/api/v1';
+    this.baseUrl = baseUrl || window.__API_BASE_URL__ || defaultUrl;
     this.modelId = options.modelId;
     this.authToken = options.authToken || localStorage.getItem('auth_token');
     this.timeout = options.timeout || 30000;
@@ -43,8 +47,25 @@ class ConfiguratorApiClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new Error(errorData.message || errorData.error || `HTTP ${response.status}`);
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = { message: response.statusText };
+        }
+        
+        const errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
+        console.error(`API Error Response from ${endpoint}:`, {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          url
+        });
+        
+        const error = new Error(errorMessage);
+        error.status = response.status;
+        error.data = errorData;
+        throw error;
       }
 
       const result = await response.json();
@@ -137,18 +158,18 @@ class ConfiguratorApiClient {
   }
 
   async getConfiguration(configId) {
-    return this.request(`/configurations/${configId}`);
+    return this.request(`/configurations/${configId}?model_id=${this.modelId}`);
   }
 
   async updateConfiguration(configId, updates) {
-    // return this.request(`/configurations/${configId}`, {
-    //   method: 'PUT',
-    //   body: {
-    //     model_id: this.modelId,
-    //     ...updates,
-    //     selections: updates.selections ? this.formatSelections(updates.selections) : undefined
-    //   }
-    // });
+    return this.request(`/configurations/${configId}`, {
+      method: 'PUT',
+      body: {
+        model_id: this.modelId,
+        ...updates,
+        selections: updates.selections ? this.formatSelections(updates.selections) : undefined
+      }
+    });
   }
 
   async deleteConfiguration(configId) {
@@ -174,8 +195,11 @@ class ConfiguratorApiClient {
   }
 
   async validateConfiguration(configId) {
-    return this.request(`/configurations/${configId}/validate`, {
-      method: 'POST'
+    return this.request(`/configurations/${configId}/validate?model_id=${this.modelId}`, {
+      method: 'POST',
+      body: {
+        model_id: this.modelId
+      }
     });
   }
 
@@ -223,14 +247,14 @@ class ConfiguratorApiClient {
     try {
       const response = await this.request(`/pricing/calculate`, {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           model_id: this.modelId,
-          selections: context.selections || {},
-          context: context.context || {},
-          ...context
-        })
+          selections: context.selections || [],
+          customer_id: context.customer_id || null,
+          context: context.context || {}
+        }
       });
-      return response.data || response;
+      return response;
     } catch (error) {
       console.error('Failed to calculate price:', error);
       throw error;

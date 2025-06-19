@@ -2,6 +2,7 @@
 // Authentication context with proper error handling
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { authApi } from '../services/api';
 
 const AuthContext = createContext({});
 
@@ -24,27 +25,27 @@ export const AuthProvider = ({ children }) => {
       try {
         const token = localStorage.getItem('auth_token');
         const userData = localStorage.getItem('user_data');
-
+        
         if (token && userData) {
           try {
+            // For development, trust stored credentials without backend validation
             const parsedUser = JSON.parse(userData);
             setUser(parsedUser);
             setIsAuthenticated(true);
-            console.log('✅ Restored authentication for user:', parsedUser.username);
           } catch (parseError) {
-            console.error('Failed to parse stored user data:', parseError);
             // Clear invalid data
             localStorage.removeItem('auth_token');
             localStorage.removeItem('user_data');
+            setUser(null);
+            setIsAuthenticated(false);
           }
-        } else {
-          console.log('ℹ️ No stored authentication found');
         }
       } catch (error) {
-        console.error('Auth check failed:', error);
         // Clear potentially corrupted data
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user_data');
+        setUser(null);
+        setIsAuthenticated(false);
       } finally {
         setIsLoading(false);
       }
@@ -53,64 +54,55 @@ export const AuthProvider = ({ children }) => {
     checkAuth();
   }, []);
 
-  const login = async (username, password) => {
+  const login = async (email, password) => {
     try {
-      console.log('🔐 Attempting login for user:', username);
-
-      // Demo authentication - use actual backend in production
-      const validCredentials = {
-        'admin': { username: 'admin', password: 'admin123', role: 'admin' },
-        'user': { username: 'user', password: 'user123', role: 'user' },
-        'demo': { username: 'demo', password: 'demo', role: 'admin' }
-      };
-
-      const userCreds = validCredentials[username.toLowerCase()];
-
-      if (userCreds && userCreds.password === password) {
-        // Simulate successful login
-        const userData = {
-          username: userCreds.username,
-          role: userCreds.role,
-          id: `user_${Date.now()}`,
-          login_time: new Date().toISOString()
-        };
-
-        // Create a demo token
-        const fakeToken = btoa(JSON.stringify({
-          user_id: userData.id,
-          username: userData.username,
-          role: userData.role,
-          exp: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
-        }));
-
-        // Store authentication data
-        localStorage.setItem('auth_token', fakeToken);
-        localStorage.setItem('user_data', JSON.stringify(userData));
-
-        setUser(userData);
-        setIsAuthenticated(true);
-
-        console.log('✅ Login successful for user:', userData.username);
-        return { success: true, user: userData };
-      } else {
-        console.warn('❌ Invalid credentials for user:', username);
+      setIsLoading(true);
+      
+      // Temporary development authentication - accepts any email/password
+      if (!email || !password) {
         return {
           success: false,
-          error: 'Invalid username or password. Try: admin/admin123'
+          error: 'Please enter both email and password'
         };
       }
+
+      // Create mock user data based on email
+      const userData = {
+        id: `user_${Date.now()}`,
+        email: email,
+        username: email.split('@')[0], // Use part before @ as username
+        role: email.includes('admin') ? 'admin' : 'user',
+        name: email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1),
+        login_time: new Date().toISOString()
+      };
+
+      // Create a development token
+      const devToken = btoa(JSON.stringify({
+        user_id: userData.id,
+        email: userData.email,
+        role: userData.role,
+        exp: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+      }));
+
+      // Store authentication data
+      localStorage.setItem('auth_token', devToken);
+      localStorage.setItem('user_data', JSON.stringify(userData));
+
+      setUser(userData);
+      setIsAuthenticated(true);
+
+      return { success: true, user: userData };
     } catch (error) {
-      console.error('Login error:', error);
       return {
         success: false,
         error: 'Login failed due to an error. Please try again.'
       };
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const logout = () => {
-    console.log('🚪 Logging out user:', user?.username);
-
     // Clear authentication data
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_data');

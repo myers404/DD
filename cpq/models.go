@@ -36,42 +36,49 @@ type Group struct {
 	MinSelections int       `json:"min_selections"`
 	MaxSelections int       `json:"max_selections"`
 	IsRequired    bool      `json:"is_required"`
+	IsActive      bool      `json:"is_active"`      // Added for frontend compatibility
 	DisplayOrder  int       `json:"display_order"`
 	OptionIDs     []string  `json:"option_ids"`
+	Options       []Option  `json:"options,omitempty"` // Added for frontend compatibility
 }
 
 // Option defines configurable options within groups
 type Option struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Description  string  `json:"description"`
-	GroupID      string  `json:"group_id"`
-	BasePrice    float64 `json:"base_price"`
-	IsDefault    bool    `json:"is_default"`
-	IsActive     bool    `json:"is_active"`
-	DisplayOrder int     `json:"display_order"`
-	Price        float64 `json:"price"`
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	GroupID      string                 `json:"group_id"`
+	BasePrice    float64                `json:"base_price"`
+	IsDefault    bool                   `json:"is_default"`
+	IsActive     bool                   `json:"is_active"`
+	DisplayOrder int                    `json:"display_order"`
+	Price        float64                `json:"price"`
+	SKU          string                 `json:"sku,omitempty"`        // Added for database compatibility
+	Attributes   map[string]interface{} `json:"attributes,omitempty"` // Added for frontend compatibility
 }
 
 // Rule defines static boolean constraints (Phase 1)
 type Rule struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Type       RuleType `json:"type"`
-	Expression string   `json:"expression"` // MTBDD expression string
-	Message    string   `json:"message"`    // User-friendly error message
-	IsActive   bool     `json:"is_active"`
-	Priority   int      `json:"priority"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Type        RuleType `json:"type"`
+	Expression  string   `json:"expression"` // MTBDD expression string
+	Message     string   `json:"message"`    // User-friendly error message
+	IsActive    bool     `json:"is_active"`
+	Priority    int      `json:"priority"`
 }
 
 // PriceRule defines static pricing calculations (Phase 2)
 type PriceRule struct {
-	ID         string        `json:"id"`
-	Name       string        `json:"name"`
-	Type       PriceRuleType `json:"type"`
-	Expression string        `json:"expression"` // Arithmetic expression
-	IsActive   bool          `json:"is_active"`
-	Priority   int           `json:"priority"`
+	ID            string        `json:"id"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description,omitempty"` // Added for frontend compatibility
+	Type          PriceRuleType `json:"type"`
+	Expression    string        `json:"expression"` // Arithmetic expression
+	DiscountValue float64       `json:"discount_value,omitempty"` // Added for database compatibility
+	IsActive      bool          `json:"is_active"`
+	Priority      int           `json:"priority"`
 }
 
 // ===================================================================
@@ -86,13 +93,16 @@ type Selection struct {
 
 // Configuration represents a complete user configuration state
 type Configuration struct {
-	ID         string      `json:"id"`
-	ModelID    string      `json:"model_id"`
-	Selections []Selection `json:"selections"`
-	IsValid    bool        `json:"is_valid"`
-	TotalPrice float64     `json:"total_price"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	ID          string      `json:"id"`
+	ModelID     string      `json:"model_id"`
+	Name        string      `json:"name,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Selections  []Selection `json:"selections"`
+	IsValid     bool        `json:"is_valid"`
+	TotalPrice  float64     `json:"total_price"`
+	Status      string      `json:"status,omitempty"` // 'draft', 'quoted', 'ordered'
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
 // ValidationResult contains constraint validation outcome

@@ -9,6 +9,7 @@ import {
   CheckCircleIcon,
   MagnifyingGlassIcon
 } from '@heroicons/react/24/outline';
+import { ensureArray } from '../../utils/arrayUtils';
 
 const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
   const [conflicts, setConflicts] = useState([]);
@@ -94,7 +95,7 @@ const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
 
   const resolveConflict = async (conflictId, resolution) => {
     // Simulate conflict resolution
-    setConflicts(prev => prev.filter(c => c.id !== conflictId));
+    setConflicts(prev => ensureArray(prev).filter(c => c.id !== conflictId));
     onConflictResolved(conflictId, resolution);
   };
 
@@ -300,7 +301,7 @@ const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
               <XCircleIcon className="w-8 h-8 text-red-500 mr-3" />
               <div>
                 <p className="text-2xl font-bold text-red-600">
-                  {conflicts.filter(c => c.severity === 'critical').length}
+                  {ensureArray(conflicts).filter(c => c.severity === 'critical').length}
                 </p>
                 <p className="text-sm text-gray-600">Critical Conflicts</p>
               </div>
@@ -311,7 +312,7 @@ const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
               <ExclamationTriangleIcon className="w-8 h-8 text-yellow-500 mr-3" />
               <div>
                 <p className="text-2xl font-bold text-yellow-600">
-                  {conflicts.filter(c => c.severity === 'warning').length}
+                  {ensureArray(conflicts).filter(c => c.severity === 'warning').length}
                 </p>
                 <p className="text-sm text-gray-600">Warning Conflicts</p>
               </div>
@@ -322,10 +323,10 @@ const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
               <CheckCircleIcon className="w-8 h-8 text-green-500 mr-3" />
               <div>
                 <p className="text-2xl font-bold text-green-600">
-                  {conflicts.length === 0 ? '✓' : conflicts.filter(c => c.severity === 'info').length}
+                  {ensureArray(conflicts).length === 0 ? '✓' : ensureArray(conflicts).filter(c => c.severity === 'info').length}
                 </p>
                 <p className="text-sm text-gray-600">
-                  {conflicts.length === 0 ? 'No Conflicts' : 'Info Conflicts'}
+                  {ensureArray(conflicts).length === 0 ? 'No Conflicts' : 'Info Conflicts'}
                 </p>
               </div>
             </div>
@@ -341,10 +342,10 @@ const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
       )}
 
       {/* Conflicts List */}
-      {!loading && !analyzing && conflicts.length > 0 && (
+      {!loading && !analyzing && ensureArray(conflicts).length > 0 && (
         <div className="space-y-4">
           <h4 className="font-medium text-gray-900">Detected Conflicts</h4>
-          {conflicts.map(conflict => (
+          {ensureArray(conflicts).map(conflict => (
             <motion.div
               key={conflict.id}
               initial={{ opacity: 0, y: 20 }}
@@ -377,7 +378,7 @@ const ConflictDetection = ({ modelId, onConflictResolved = () => {} }) => {
       )}
 
       {/* No Conflicts State */}
-      {!loading && !analyzing && conflicts.length === 0 && (
+      {!loading && !analyzing && ensureArray(conflicts).length === 0 && (
         <div className="text-center py-12">
           <CheckCircleIcon className="w-16 h-16 text-green-500 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">No Conflicts Detected</h3>

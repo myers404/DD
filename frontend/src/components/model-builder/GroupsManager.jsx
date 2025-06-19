@@ -25,6 +25,7 @@ import {
 import { cpqApi } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorBoundary from '../common/ErrorBoundary';
+import { ensureArray } from '../../utils/arrayUtils';
 
 const GroupsManager = ({ modelId }) => {
   const [editingGroup, setEditingGroup] = useState(null);
@@ -49,27 +50,41 @@ const GroupsManager = ({ modelId }) => {
 
   // Create group mutation
   const createGroupMutation = useMutation({
-    mutationFn: (groupData) => cpqApi.createGroup(modelId, groupData),
-    onSuccess: () => {
+    mutationFn: (groupData) => {
+      // Generate ID for new group
+      const groupWithId = {
+        ...groupData,
+        id: `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      };
+      console.log('Creating group:', groupWithId);
+      return cpqApi.createGroup(modelId, groupWithId);
+    },
+    onSuccess: (data) => {
+      console.log('Group created successfully:', data);
       queryClient.invalidateQueries(['model-groups', modelId]);
       toast.success('Group created successfully!');
       setShowCreateDialog(false);
     },
     onError: (error) => {
+      console.error('Failed to create group:', error);
       toast.error(error.message || 'Failed to create group');
     }
   });
 
   // Update group mutation
   const updateGroupMutation = useMutation({
-    mutationFn: ({ groupId, ...groupData }) =>
-        cpqApi.updateGroup(modelId, groupId, groupData),
-    onSuccess: () => {
+    mutationFn: ({ groupId, ...groupData }) => {
+      console.log('Updating group:', groupId, groupData);
+      return cpqApi.updateGroup(modelId, groupId, groupData);
+    },
+    onSuccess: (data) => {
+      console.log('Group updated successfully:', data);
       queryClient.invalidateQueries(['model-groups', modelId]);
       toast.success('Group updated successfully!');
       setEditingGroup(null);
     },
     onError: (error) => {
+      console.error('Failed to update group:', error);
       toast.error(error.message || 'Failed to update group');
     }
   });
@@ -88,13 +103,17 @@ const GroupsManager = ({ modelId }) => {
 
   // Toggle group active status
   const toggleGroupMutation = useMutation({
-    mutationFn: ({ groupId, active }) =>
-        cpqApi.updateGroup(modelId, groupId, { active }),
-    onSuccess: () => {
+    mutationFn: ({ groupId, is_active }) => {
+      console.log('Toggling group status:', groupId, 'to', is_active);
+      return cpqApi.updateGroup(modelId, groupId, { is_active });
+    },
+    onSuccess: (data) => {
+      console.log('Toggle success, response:', data);
       queryClient.invalidateQueries(['model-groups', modelId]);
       toast.success('Group status updated!');
     },
     onError: (error) => {
+      console.error('Toggle failed:', error);
       toast.error(error.message || 'Failed to update group status');
     }
   });
@@ -114,7 +133,7 @@ const GroupsManager = ({ modelId }) => {
   const filteredGroups = (Array.isArray(groups) ? groups : []).filter(group => {
     const matchesSearch = group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (group.description || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesActive = showInactive || group.active;
+    const matchesActive = showInactive || group.is_active;
 
     return matchesSearch && matchesActive;
   });
@@ -124,21 +143,24 @@ const GroupsManager = ({ modelId }) => {
     const issues = [];
 
     if (group.type === 'multi_select') {
-      if (group.minSelections > group.maxSelections) {
+      if (group.min_selections > group.max_selections) {
         issues.push('Minimum selections cannot exceed maximum selections');
       }
-      if (group.maxSelections > group.options.length) {
+      if (group.max_selections > ensureArray(group.options).length) {
         issues.push('Maximum selections exceeds available options');
       }
     }
 
-    if (group.options.length === 0) {
-      issues.push('Group has no options');
-    }
-
-    const activeOptions = group.options.filter(opt => opt.active);
-    if (activeOptions.length === 0) {
-      issues.push('Group has no active options');
+    // Only show option-related warnings if the group is active and intended to be complete
+    if (group.is_active) {
+      if (ensureArray(group.options).length === 0) {
+        issues.push('Group has no options - add options in the Options tab');
+      } else {
+        const activeOptions = ensureArray(group.options).filter(opt => opt.is_active);
+        if (activeOptions.length === 0) {
+          issues.push('Group has no active options');
+        }
+      }
     }
 
     return issues;
@@ -176,10 +198,12 @@ const GroupsManager = ({ modelId }) => {
       name: group?.name || '',
       description: group?.description || '',
       type: group?.type || 'single_select',
-      active: group?.active !== false,
-      displayOrder: group?.displayOrder || 1,
-      minSelections: group?.minSelections || 0,
-      maxSelections: group?.maxSelections || 1,
+      is_active: group?.is_active !== false,
+      display_order: group?.display_order || 1,
+      min_selections: group?.min_selections || 0,
+      max_selections: group?.max_selections || 1,
+      is_required: group?.is_required || false,
+      option_ids: group?.option_ids || [],
       ...group
     });
 
@@ -189,11 +213,11 @@ const GroupsManager = ({ modelId }) => {
       const errors = [];
       if (!groupData.name?.trim()) errors.push('Name is required');
       if (groupData.type === 'multi_select') {
-        if (groupData.minSelections > groupData.maxSelections) {
+        if (groupData.min_selections > groupData.max_selections) {
           errors.push('Minimum selections cannot exceed maximum selections');
         }
-        if (groupData.minSelections < 0) errors.push('Minimum selections cannot be negative');
-        if (groupData.maxSelections < 1) errors.push('Maximum selections must be at least 1');
+        if (groupData.min_selections < 0) errors.push('Minimum selections cannot be negative');
+        if (groupData.max_selections < 1) errors.push('Maximum selections must be at least 1');
       }
       return errors;
     };
@@ -211,11 +235,11 @@ const GroupsManager = ({ modelId }) => {
       let updates = { type: newType };
 
       if (newType === 'single_select' || newType === 'optional') {
-        updates.minSelections = newType === 'optional' ? 0 : 1;
-        updates.maxSelections = 1;
+        updates.min_selections = newType === 'optional' ? 0 : 1;
+        updates.max_selections = 1;
       } else if (newType === 'multi_select') {
-        updates.minSelections = 0;
-        updates.maxSelections = 5;
+        updates.min_selections = 0;
+        updates.max_selections = 5;
       }
 
       setFormData({ ...formData, ...updates });
@@ -318,8 +342,8 @@ const GroupsManager = ({ modelId }) => {
                           </label>
                           <input
                               type="number"
-                              value={formData.minSelections}
-                              onChange={(e) => setFormData({...formData, minSelections: Number(e.target.value)})}
+                              value={formData.min_selections}
+                              onChange={(e) => setFormData({...formData, min_selections: Number(e.target.value)})}
                               className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min="0"
                           />
@@ -330,8 +354,8 @@ const GroupsManager = ({ modelId }) => {
                           </label>
                           <input
                               type="number"
-                              value={formData.maxSelections}
-                              onChange={(e) => setFormData({...formData, maxSelections: Number(e.target.value)})}
+                              value={formData.max_selections}
+                              onChange={(e) => setFormData({...formData, max_selections: Number(e.target.value)})}
                               className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min="1"
                           />
@@ -348,8 +372,8 @@ const GroupsManager = ({ modelId }) => {
                     </label>
                     <input
                         type="number"
-                        value={formData.displayOrder}
-                        onChange={(e) => setFormData({...formData, displayOrder: Number(e.target.value)})}
+                        value={formData.display_order}
+                        onChange={(e) => setFormData({...formData, display_order: Number(e.target.value)})}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         min="1"
                     />
@@ -363,8 +387,8 @@ const GroupsManager = ({ modelId }) => {
                       <label className="flex items-center">
                         <input
                             type="checkbox"
-                            checked={formData.active}
-                            onChange={(e) => setFormData({...formData, active: e.target.checked})}
+                            checked={formData.is_active}
+                            onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
                             className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                         />
                         <span className="ml-2 text-sm text-gray-700">Active</span>
@@ -487,8 +511,8 @@ const GroupsManager = ({ modelId }) => {
               Showing {filteredGroups.length} of {groups.length} groups
             </span>
               <div className="flex items-center space-x-4">
-                <span>Active: {(Array.isArray(groups) ? groups : []).filter(g => g.active).length}</span>
-                <span>Inactive: {(Array.isArray(groups) ? groups : []).filter(g => !g.active).length}</span>
+                <span>Active: {(Array.isArray(groups) ? groups : []).filter(g => g.is_active).length}</span>
+                <span>Inactive: {(Array.isArray(groups) ? groups : []).filter(g => !g.is_active).length}</span>
               </div>
             </div>
           </div>
@@ -498,7 +522,7 @@ const GroupsManager = ({ modelId }) => {
             <AnimatePresence>
               {filteredGroups.length > 0 ? (
                   filteredGroups
-                      .sort((a, b) => a.displayOrder - b.displayOrder)
+                      .sort((a, b) => a.display_order - b.display_order)
                       .map((group) => {
                         const isExpanded = expandedGroups.has(group.id);
                         const issues = validateGroupConstraints(group);
@@ -512,7 +536,7 @@ const GroupsManager = ({ modelId }) => {
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -20 }}
                                 className={`bg-white border rounded-lg overflow-hidden ${
-                                    group.active ? 'border-gray-200' : 'border-gray-200 bg-gray-50'
+                                    group.is_active ? 'border-gray-200' : 'border-gray-200 bg-gray-50'
                                 } ${issues.length > 0 ? 'border-l-4 border-l-red-500' : ''}`}
                             >
                               {/* Group Header */}
@@ -521,10 +545,10 @@ const GroupsManager = ({ modelId }) => {
                                   <div className="flex items-center space-x-4 flex-1">
                                     <div className="flex items-center space-x-3">
                                       <div className={`p-2 rounded-lg ${
-                                          group.active ? `bg-${typeInfo.color}-100` : 'bg-gray-100'
+                                          group.is_active ? `bg-${typeInfo.color}-100` : 'bg-gray-100'
                                       }`}>
                                 <span className={`text-lg ${
-                                    group.active ? `text-${typeInfo.color}-600` : 'text-gray-400'
+                                    group.is_active ? `text-${typeInfo.color}-600` : 'text-gray-400'
                                 }`}>
                                   {typeInfo.icon}
                                 </span>
@@ -533,12 +557,12 @@ const GroupsManager = ({ modelId }) => {
                                       <div>
                                         <div className="flex items-center space-x-2 mb-1">
                                           <h4 className={`font-medium ${
-                                              group.active ? 'text-gray-900' : 'text-gray-500'
+                                              group.is_active ? 'text-gray-900' : 'text-gray-500'
                                           }`}>
                                             {group.name}
                                           </h4>
 
-                                          {!group.active && (
+                                          {!group.is_active && (
                                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                                       <EyeSlashIcon className="w-3 h-3 mr-1" />
                                       Inactive
@@ -562,12 +586,12 @@ const GroupsManager = ({ modelId }) => {
                                     <button
                                         onClick={() => toggleGroupMutation.mutate({
                                           groupId: group.id,
-                                          active: !group.active
+                                          is_active: !group.is_active
                                         })}
                                         className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                                        title={group.active ? 'Deactivate' : 'Activate'}
+                                        title={group.is_active ? 'Deactivate' : 'Activate'}
                                     >
-                                      {group.active ? (
+                                      {group.is_active ? (
                                           <EyeIcon className="w-4 h-4" />
                                       ) : (
                                           <EyeSlashIcon className="w-4 h-4" />
@@ -611,12 +635,12 @@ const GroupsManager = ({ modelId }) => {
                                 <div className="mt-4 flex items-center space-x-6 text-sm text-gray-600">
                                   {group.type === 'multi_select' && (
                                       <span>
-                              Selections: {group.minSelections} - {group.maxSelections}
+                              Selections: {group.min_selections} - {group.max_selections}
                             </span>
                                   )}
-                                  <span>Order: {group.displayOrder}</span>
-                                  <span>Active Options: {group.options?.filter(opt => opt.active).length || 0}</span>
-                                  <span>Total Options: {group.options?.length || 0}</span>
+                                  <span>Order: {group.display_order}</span>
+                                  <span>Active Options: {ensureArray(group.options)?.filter(opt => opt.is_active).length || 0}</span>
+                                  <span>Total Options: {ensureArray(group.options)?.length || 0}</span>
                                 </div>
 
                                 {/* Issues */}
@@ -650,18 +674,18 @@ const GroupsManager = ({ modelId }) => {
                                           <div>
                                             <h5 className="font-medium text-gray-900 mb-3 flex items-center">
                                               <CogIcon className="w-4 h-4 mr-2" />
-                                              Options ({group.options?.length || 0})
+                                              Options ({ensureArray(group.options)?.length || 0})
                                             </h5>
-                                            {group.options && group.options.length > 0 ? (
+                                            {ensureArray(group.options) && ensureArray(group.options).length > 0 ? (
                                                 <div className="space-y-2">
-                                                  {group.options.map(option => (
+                                                  {ensureArray(group.options).map(option => (
                                                       <div key={option.id} className="flex items-center justify-between p-2 bg-white rounded border">
-                                          <span className={`text-sm ${option.active ? 'text-gray-900' : 'text-gray-500'}`}>
+                                          <span className={`text-sm ${option.is_active ? 'text-gray-900' : 'text-gray-500'}`}>
                                             {option.name}
                                           </span>
                                                         <div className="flex items-center space-x-2 text-xs text-gray-500">
-                                                          <span>${option.price?.toFixed(2) || '0.00'}</span>
-                                                          {!option.active && (
+                                                          <span>${option.base_price?.toFixed(2) || '0.00'}</span>
+                                                          {!option.is_active && (
                                                               <span className="text-red-500">Inactive</span>
                                                           )}
                                                         </div>
@@ -688,22 +712,22 @@ const GroupsManager = ({ modelId }) => {
                                                   <>
                                                     <div className="flex justify-between">
                                                       <span className="text-gray-600">Min Selections:</span>
-                                                      <span className="font-medium">{group.minSelections}</span>
+                                                      <span className="font-medium">{group.min_selections}</span>
                                                     </div>
                                                     <div className="flex justify-between">
                                                       <span className="text-gray-600">Max Selections:</span>
-                                                      <span className="font-medium">{group.maxSelections}</span>
+                                                      <span className="font-medium">{group.max_selections}</span>
                                                     </div>
                                                   </>
                                               )}
                                               <div className="flex justify-between">
                                                 <span className="text-gray-600">Display Order:</span>
-                                                <span className="font-medium">{group.displayOrder}</span>
+                                                <span className="font-medium">{group.display_order}</span>
                                               </div>
                                               <div className="flex justify-between">
                                                 <span className="text-gray-600">Status:</span>
-                                                <span className={`font-medium ${group.active ? 'text-green-600' : 'text-red-600'}`}>
-                                        {group.active ? 'Active' : 'Inactive'}
+                                                <span className={`font-medium ${group.is_active ? 'text-green-600' : 'text-red-600'}`}>
+                                        {group.is_active ? 'Active' : 'Inactive'}
                                       </span>
                                               </div>
                                             </div>

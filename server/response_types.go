@@ -11,6 +11,7 @@ import (
 
 	"DD/cpq"
 	"DD/modelbuilder"
+	"github.com/gorilla/mux"
 )
 
 // APIResponse represents a standard API response wrapper
@@ -150,10 +151,10 @@ type PricingRequest struct {
 
 // PricingResponse represents pricing calculation results
 type PricingResponse struct {
-	Breakdown *cpq.PriceBreakdown `json:"breakdown"`
-	Total     float64             `json:"total"`
-	Currency  string              `json:"currency"`
-	Timestamp time.Time           `json:"timestamp"`
+	Breakdown *cpq.PricingResult `json:"breakdown"`
+	Total     float64            `json:"total"`
+	Currency  string             `json:"currency"`
+	Timestamp time.Time          `json:"timestamp"`
 }
 
 // Analytics API Types
@@ -319,11 +320,11 @@ func ParseJSONRequest(r *http.Request, target interface{}) error {
 
 // ExtractPathParam extracts a path parameter from the request
 func ExtractPathParam(r *http.Request, param string) (string, error) {
-	// This would use mux.Vars(r) in practice
-	// For now, simplified implementation
-	value := r.URL.Query().Get(param)
-	if value == "" {
-		return "", fmt.Errorf("missing required parameter: %s", param)
+	// Use mux.Vars to extract path parameters from Gorilla Mux
+	vars := mux.Vars(r)
+	value, exists := vars[param]
+	if !exists || value == "" {
+		return "", fmt.Errorf("missing required path parameter: %s", param)
 	}
 	return value, nil
 }

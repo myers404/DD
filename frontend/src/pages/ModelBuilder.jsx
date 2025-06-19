@@ -35,12 +35,14 @@ import { cpqApi, modelBuilderApi } from '../services/api';
 // Model Builder Components
 import OptionsManager from '../components/model-builder/OptionsManager';
 import GroupsManager from '../components/model-builder/GroupsManager';
-import RuleEditor from '../components/model-builder/RuleEditor';
+import RulesManager from '../components/model-builder/RulesManager';
 import PricingRulesEditor from '../components/model-builder/PricingRulesEditor';
 import ModelValidation from '../components/model-builder/ModelValidation';
 import ConflictDetection from '../components/model-builder/ConflictDetection';
 import ImpactAnalysis from '../components/model-builder/ImpactAnalysis';
 import RulePriorityManager from '../components/model-builder/RulePriorityManager';
+import ConstraintTester from '../components/model-builder/ConstraintTester';
+import ConstraintApiTester from '../components/model-builder/ConstraintApiTester';
 
 // Common Components
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -198,6 +200,18 @@ const ModelBuilder = () => {
       name: 'Validation',
       icon: CheckCircleIcon,
       description: 'Validate model integrity'
+    },
+    {
+      id: 'constraint-test',
+      name: 'Constraint Test',
+      icon: BeakerIcon,
+      description: 'Test constraint rules interactively'
+    },
+    {
+      id: 'api-test',
+      name: 'API Test',
+      icon: PlayIcon,
+      description: 'Test backend constraint validation'
     }
   ];
 
@@ -500,64 +514,40 @@ const ModelBuilder = () => {
                   {activeTab === 'options' && (
                       <div>
                         <h3 className="text-lg font-medium text-gray-900 mb-4">Configuration Options</h3>
-                        <p className="text-gray-500">Options management interface will be implemented here.</p>
-                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-600">
-                            Current options: {model.options?.length || 0}
-                          </p>
-                          <OptionsManager
-                              modelId={modelId}
-                              onUpdate={handleModelUpdate}
-                          />
-                        </div>
+                        <OptionsManager
+                            modelId={modelId}
+                            onUpdate={handleModelUpdate}
+                        />
                       </div>
                   )}
 
                   {activeTab === 'groups' && (
                       <div>
                         <h3 className="text-lg font-medium text-gray-900 mb-4">Option Groups</h3>
-                        <p className="text-gray-500">Groups management interface will be implemented here.</p>
-                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-600">
-                            Current groups: {model.groups?.length || 0}
-                          </p>
-                          <GroupsManager
-                              modelId={modelId}
-                              onUpdate={handleModelUpdate}
-                          />
-                        </div>
+                        <GroupsManager
+                            modelId={modelId}
+                            onUpdate={handleModelUpdate}
+                        />
                       </div>
                   )}
 
                   {activeTab === 'rules' && (
                       <div>
                         <h3 className="text-lg font-medium text-gray-900 mb-4">Business Rules</h3>
-                        <p className="text-gray-500">Rules management interface will be implemented here.</p>
-                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-600">
-                            Current rules: {model.rules?.length || 0}
-                          </p>
-                          <RuleEditor
-                              modelId={modelId}
-                              onUpdate={handleModelUpdate}
-                          />
-                        </div>
+                        <RulesManager
+                            modelId={modelId}
+                            onUpdate={handleModelUpdate}
+                        />
                       </div>
                   )}
 
                   {activeTab === 'pricing' && (
                       <div>
                         <h3 className="text-lg font-medium text-gray-900 mb-4">Pricing Rules</h3>
-                        <p className="text-gray-500">Pricing management interface will be implemented here.</p>
-                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-600">
-                            Current pricing rules: {model.price_rules?.length || 0}
-                          </p>
-                          <PricingRulesEditor
-                              modelId={modelId}
-                              onUpdate={handleModelUpdate}
-                          />
-                        </div>
+                        <PricingRulesEditor
+                            modelId={modelId}
+                            onUpdate={handleModelUpdate}
+                        />
                       </div>
                   )}
 
@@ -613,6 +603,17 @@ const ModelBuilder = () => {
                           )}
                         </div>
                       </div>
+                  )}
+
+                  {activeTab === 'constraint-test' && (
+                      <ConstraintTester 
+                        model={model} 
+                        rules={model.rules || []} 
+                      />
+                  )}
+
+                  {activeTab === 'api-test' && (
+                      <ConstraintApiTester />
                   )}
                 </motion.div>
               </AnimatePresence>

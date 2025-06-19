@@ -23,6 +23,7 @@ import { cpqApi, modelBuilderApi } from '../../services/api';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorBoundary from '../common/ErrorBoundary';
 import Modal from '../common/Modal';
+import { ensureArray } from '../../utils/arrayUtils';
 
 const OptionsManager = ({ modelId }) => {
   const [editingOption, setEditingOption] = useState(null);
@@ -59,9 +60,17 @@ const OptionsManager = ({ modelId }) => {
 
   // Create option mutation
   const createOptionMutation = useMutation({
-    mutationFn: (optionData) => cpqApi.createOption(modelId, optionData),
+    mutationFn: (optionData) => {
+      // Generate ID for new option
+      const optionWithId = {
+        ...optionData,
+        id: `option_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      };
+      return cpqApi.createOption(modelId, optionWithId);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['model-options', modelId]);
+      queryClient.invalidateQueries(['model-groups', modelId]); // Refresh groups with options
       toast.success('Option created successfully!');
       setShowCreateDialog(false);
     },
@@ -76,6 +85,7 @@ const OptionsManager = ({ modelId }) => {
         cpqApi.updateOption(modelId, optionId, optionData),
     onSuccess: () => {
       queryClient.invalidateQueries(['model-options', modelId]);
+      queryClient.invalidateQueries(['model-groups', modelId]); // Refresh groups with options
       toast.success('Option updated successfully!');
       setEditingOption(null);
     },
@@ -89,6 +99,7 @@ const OptionsManager = ({ modelId }) => {
     mutationFn: (optionId) => cpqApi.deleteOption(modelId, optionId),
     onSuccess: () => {
       queryClient.invalidateQueries(['model-options', modelId]);
+      queryClient.invalidateQueries(['model-groups', modelId]); // Refresh groups with options
       toast.success('Option deleted successfully!');
     },
     onError: (error) => {
@@ -98,10 +109,11 @@ const OptionsManager = ({ modelId }) => {
 
   // Toggle option active status
   const toggleOptionMutation = useMutation({
-    mutationFn: ({ optionId, active }) =>
-        cpqApi.updateOption(modelId, optionId, { active }),
+    mutationFn: ({ optionId, is_active }) =>
+        cpqApi.updateOption(modelId, optionId, { is_active }),
     onSuccess: () => {
       queryClient.invalidateQueries(['model-options', modelId]);
+      queryClient.invalidateQueries(['model-groups', modelId]); // Refresh groups with options
       toast.success('Option status updated!');
     },
     onError: (error) => {
@@ -110,18 +122,18 @@ const OptionsManager = ({ modelId }) => {
   });
 
   // Filter options based on search and filters
-  const filteredOptions = options.filter(option => {
+  const filteredOptions = ensureArray(options).filter(option => {
     const matchesSearch = option.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (option.description || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesGroup = selectedGroup === 'all' || option.groupId === selectedGroup;
-    const matchesActive = showInactive || option.active;
+    const matchesGroup = selectedGroup === 'all' || option.group_id === selectedGroup;
+    const matchesActive = showInactive || option.is_active;
 
     return matchesSearch && matchesGroup && matchesActive;
   });
 
   // Get group name for display
   const getGroupName = (groupId) => {
-    const group = groups.find(g => g.id === groupId);
+    const group = ensureArray(groups).find(g => g.id === groupId);
     return group ? group.name : 'Ungrouped';
   };
 
@@ -129,8 +141,8 @@ const OptionsManager = ({ modelId }) => {
   const validateOption = (option) => {
     const errors = [];
     if (!option.name?.trim()) errors.push('Name is required');
-    if (!option.groupId) errors.push('Group selection is required');
-    if (option.price && isNaN(option.price)) errors.push('Price must be a valid number');
+    if (!option.group_id) errors.push('Group selection is required');
+    if (option.base_price && isNaN(option.base_price)) errors.push('Price must be a valid number');
     return errors;
   };
 
@@ -139,11 +151,13 @@ const OptionsManager = ({ modelId }) => {
     const [formData, setFormData] = useState({
       name: option?.name || '',
       description: option?.description || '',
-      groupId: option?.groupId || (groups[0]?.id || ''),
-      price: option?.price || 0,
-      active: option?.active !== false,
+      group_id: option?.group_id || (ensureArray(groups)[0]?.id || ''),
+      base_price: option?.base_price || 0,
+      is_active: option?.is_active !== false,
+      is_default: option?.is_default || false,
       attributes: option?.attributes || {},
-      displayOrder: option?.displayOrder || 1,
+      display_order: option?.display_order || 1,
+      price: option?.price || option?.base_price || 0,
       ...option
     });
 
@@ -238,12 +252,12 @@ const OptionsManager = ({ modelId }) => {
                       Group *
                     </label>
                     <select
-                        value={formData.groupId}
-                        onChange={(e) => setFormData({...formData, groupId: e.target.value})}
+                        value={formData.group_id}
+                        onChange={(e) => setFormData({...formData, group_id: e.target.value})}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="">Select a group</option>
-                      {groups.map(group => (
+                      {ensureArray(groups).map(group => (
                           <option key={group.id} value={group.id}>
                             {group.name}
                           </option>
@@ -274,8 +288,8 @@ const OptionsManager = ({ modelId }) => {
                     </label>
                     <input
                         type="number"
-                        value={formData.price}
-                        onChange={(e) => setFormData({...formData, price: Number(e.target.value)})}
+                        value={formData.base_price}
+                        onChange={(e) => setFormData({...formData, base_price: Number(e.target.value)})}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         placeholder="0.00"
                         step="0.01"
@@ -289,8 +303,8 @@ const OptionsManager = ({ modelId }) => {
                     </label>
                     <input
                         type="number"
-                        value={formData.displayOrder}
-                        onChange={(e) => setFormData({...formData, displayOrder: Number(e.target.value)})}
+                        value={formData.display_order}
+                        onChange={(e) => setFormData({...formData, display_order: Number(e.target.value)})}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         min="1"
                     />
@@ -304,8 +318,8 @@ const OptionsManager = ({ modelId }) => {
                       <label className="flex items-center">
                         <input
                             type="checkbox"
-                            checked={formData.active}
-                            onChange={(e) => setFormData({...formData, active: e.target.checked})}
+                            checked={formData.is_active}
+                            onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
                             className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                         />
                         <span className="ml-2 text-sm text-gray-700">Active</span>
@@ -395,7 +409,7 @@ const OptionsManager = ({ modelId }) => {
 
   // Option Card Component
   const OptionCard = ({ option }) => {
-    const groupName = getGroupName(option.groupId);
+    const groupName = getGroupName(option.group_id);
 
     return (
         <motion.div
@@ -404,16 +418,16 @@ const OptionsManager = ({ modelId }) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             className={`bg-white border rounded-lg p-4 hover:shadow-md transition-all ${
-                !option.active ? 'bg-gray-50 border-gray-200' : 'border-gray-200 hover:border-blue-300'
+                !option.is_active ? 'bg-gray-50 border-gray-200' : 'border-gray-200 hover:border-blue-300'
             }`}
         >
           <div className="flex justify-between items-start mb-3">
             <div className="flex-1">
               <div className="flex items-center space-x-2 mb-2">
-                <h4 className={`font-medium ${option.active ? 'text-gray-900' : 'text-gray-500'}`}>
+                <h4 className={`font-medium ${option.is_active ? 'text-gray-900' : 'text-gray-500'}`}>
                   {option.name}
                 </h4>
-                {!option.active && (
+                {!option.is_active && (
                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                   <EyeSlashIcon className="w-3 h-3 mr-1" />
                   Inactive
@@ -426,8 +440,8 @@ const OptionsManager = ({ modelId }) => {
                 <TagIcon className="w-3 h-3 mr-1" />
                 {groupName}
               </span>
-                <span>${option.price?.toFixed(2) || '0.00'}</span>
-                <span>Order: {option.displayOrder}</span>
+                <span>${option.base_price?.toFixed(2) || '0.00'}</span>
+                <span>Order: {option.display_order}</span>
               </div>
 
               {option.description && (
@@ -450,12 +464,12 @@ const OptionsManager = ({ modelId }) => {
               <button
                   onClick={() => toggleOptionMutation.mutate({
                     optionId: option.id,
-                    active: !option.active
+                    is_active: !option.is_active
                   })}
                   className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                  title={option.active ? 'Deactivate' : 'Activate'}
+                  title={option.is_active ? 'Deactivate' : 'Activate'}
               >
-                {option.active ? (
+                {option.is_active ? (
                     <EyeIcon className="w-4 h-4" />
                 ) : (
                     <EyeSlashIcon className="w-4 h-4" />
@@ -545,7 +559,7 @@ const OptionsManager = ({ modelId }) => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="all">All Groups</option>
-                  {groups.map(group => (
+                  {ensureArray(groups).map(group => (
                       <option key={group.id} value={group.id}>
                         {group.name}
                       </option>
@@ -573,8 +587,8 @@ const OptionsManager = ({ modelId }) => {
               Showing {filteredOptions.length} of {options.length} options
             </span>
               <div className="flex items-center space-x-4">
-                <span>Active: {options.filter(o => o.active).length}</span>
-                <span>Inactive: {options.filter(o => !o.active).length}</span>
+                <span>Active: {ensureArray(options).filter(o => o.is_active).length}</span>
+                <span>Inactive: {ensureArray(options).filter(o => !o.is_active).length}</span>
               </div>
             </div>
           </div>
@@ -584,7 +598,7 @@ const OptionsManager = ({ modelId }) => {
             <AnimatePresence>
               {filteredOptions.length > 0 ? (
                   filteredOptions
-                      .sort((a, b) => a.displayOrder - b.displayOrder)
+                      .sort((a, b) => a.display_order - b.display_order)
                       .map(option => (
                           <OptionCard key={option.id} option={option} />
                       ))

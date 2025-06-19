@@ -41,8 +41,17 @@ type ConfigurationUpdate struct {
 	UpdatedConfig    Configuration     `json:"updated_config"`
 	ValidationResult ValidationResult  `json:"validation_result"`
 	PriceBreakdown   PriceBreakdown    `json:"price_breakdown"`
+	PricingResult    *PricingResult    `json:"pricing_result,omitempty"` // Added for interface compatibility
 	AvailableOptions []AvailableOption `json:"available_options"`
 	ResponseTime     time.Duration     `json:"response_time"`
+}
+
+// PricingResult represents the result of pricing calculations
+type PricingResult struct {
+	BasePrice   float64           `json:"base_price"`
+	Adjustments []PriceAdjustment `json:"adjustments"`
+	TotalPrice  float64           `json:"total_price"`
+	Breakdown   *PriceBreakdown   `json:"breakdown,omitempty"`
 }
 
 // AvailableOption represents an option that can be selected
@@ -517,4 +526,23 @@ func (c *Configurator) ResetStats() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.stats = ConfiguratorStats{}
+}
+
+// CalculatePricing calculates pricing for a given set of selections (for interface compatibility)
+func (c *Configurator) CalculatePricing(selections []Selection) (*PricingResult, error) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	
+	// Calculate pricing
+	breakdown := c.pricingCalc.CalculatePrice(selections)
+	
+	// Convert to PricingResult
+	result := &PricingResult{
+		BasePrice:   breakdown.BasePrice,
+		Adjustments: breakdown.Adjustments,
+		TotalPrice:  breakdown.TotalPrice,
+		Breakdown:   &breakdown,
+	}
+	
+	return result, nil
 }

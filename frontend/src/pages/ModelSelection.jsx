@@ -29,11 +29,12 @@ const ModelSelection = () => {
     const queryClient = useQueryClient();
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
     const [selectedModel, setSelectedModel] = useState(null);
     const [formData, setFormData] = useState({
         name: '',
         description: '',
-        category: ''
+        version: '1.0.0'
     });
 
     // Fetch models
@@ -121,11 +122,26 @@ const ModelSelection = () => {
         }
     });
 
+    // Update model mutation
+    const updateMutation = useMutation({
+        mutationFn: ({ modelId, modelData }) => cpqApi.updateModel(modelId, modelData),
+        onSuccess: () => {
+            queryClient.invalidateQueries(['models']);
+            toast.success('Model updated successfully');
+            setShowEditModal(false);
+            setSelectedModel(null);
+            resetForm();
+        },
+        onError: (err) => {
+            toast.error(err.message || 'Failed to update model');
+        }
+    });
+
     const resetForm = () => {
         setFormData({
             name: '',
             description: '',
-            category: ''
+            version: '1.0.0'
         });
     };
 
@@ -148,6 +164,30 @@ const ModelSelection = () => {
 
     const handleCloneModel = (model) => {
         cloneMutation.mutate(model.id);
+    };
+
+    const handleEditModel = (model) => {
+        setSelectedModel(model);
+        setFormData({
+            name: model.name || '',
+            description: model.description || '',
+            version: model.version || '1.0.0'
+        });
+        setShowEditModal(true);
+    };
+
+    const handleEditSubmit = (e) => {
+        e.preventDefault();
+
+        if (!formData.name.trim()) {
+            toast.error('Model name is required');
+            return;
+        }
+
+        updateMutation.mutate({
+            modelId: selectedModel.id,
+            modelData: formData
+        });
     };
 
     const formatDate = (dateString) => {
@@ -216,16 +256,16 @@ const ModelSelection = () => {
         <div className="p-6 max-w-7xl mx-auto">
             {/* Header */}
             <div className="mb-8">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Product Models</h1>
+                        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Product Models</h1>
                         <p className="mt-1 text-sm text-gray-500">
                             Create and manage configuration models for your products
                         </p>
                     </div>
                     <button
                         onClick={() => setShowCreateModal(true)}
-                        className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                        className="flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                     >
                         <PlusIcon className="h-5 w-5 mr-2" />
                         Create Model
@@ -263,13 +303,13 @@ const ModelSelection = () => {
                                     exit={{ opacity: 0, y: -20 }}
                                     className="bg-white rounded-lg border hover:shadow-lg transition-shadow duration-200"
                                 >
-                                    <div className="p-6">
+                                    <div className="p-4 sm:p-6">
                                         {/* Header */}
-                                        <div className="flex items-start justify-between mb-4">
-                                            <div className="flex items-center">
-                                                <CubeIcon className="h-8 w-8 text-blue-600 mr-3" />
-                                                <div>
-                                                    <h3 className="text-lg font-semibold text-gray-900 truncate">
+                                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
+                                            <div className="flex items-center min-w-0">
+                                                <CubeIcon className="h-8 w-8 text-blue-600 mr-3 flex-shrink-0" />
+                                                <div className="min-w-0 flex-1">
+                                                    <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
                                                         {model.name || 'Unnamed Model'}
                                                     </h3>
                                                     <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${
@@ -285,7 +325,7 @@ const ModelSelection = () => {
                                             </div>
 
                                             {/* Actions Menu */}
-                                            <div className="relative">
+                                            <div className="relative self-start">
                                                 <button className="p-1 hover:bg-gray-100 rounded">
                                                     <EllipsisVerticalIcon className="h-5 w-5 text-gray-400" />
                                                 </button>
@@ -328,24 +368,32 @@ const ModelSelection = () => {
                                         </div>
 
                                         {/* Actions */}
-                                        <div className="flex gap-2">
+                                        <div className="grid grid-cols-3 sm:flex gap-1 sm:gap-2">
                                             <Link
                                                 to={`/models/${model.id}`}
-                                                className="flex-1 flex items-center justify-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                                                className="flex sm:flex-1 flex items-center justify-center px-2 sm:px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs sm:text-sm"
                                             >
-                                                <WrenchScrewdriverIcon className="h-4 w-4 mr-1" />
-                                                Build
+                                                <WrenchScrewdriverIcon className="h-4 w-4 sm:mr-1" />
+                                                <span className="hidden sm:inline">Build</span>
                                             </Link>
                                             <Link
                                                 to={`/models/${model.id}/configurations`}
-                                                className="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                                                className="flex items-center justify-center px-2 sm:px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
                                                 title="View Configurations"
                                             >
                                                 <RectangleStackIcon className="h-4 w-4" />
                                             </Link>
                                             <button
+                                                onClick={() => handleEditModel(model)}
+                                                className="flex items-center justify-center px-2 sm:px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                                                title="Edit Model"
+                                                disabled={updateMutation.isLoading}
+                                            >
+                                                <PencilIcon className="h-4 w-4" />
+                                            </button>
+                                            <button
                                                 onClick={() => handleCloneModel(model)}
-                                                className="flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                                                className="flex items-center justify-center px-2 sm:px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
                                                 title="Clone Model"
                                                 disabled={cloneMutation.isLoading}
                                             >
@@ -356,7 +404,7 @@ const ModelSelection = () => {
                                                     setSelectedModel(model);
                                                     setShowDeleteModal(true);
                                                 }}
-                                                className="flex items-center justify-center px-3 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                                                className="flex items-center justify-center px-2 sm:px-3 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
                                                 title="Delete Model"
                                             >
                                                 <TrashIcon className="h-4 w-4" />
@@ -410,16 +458,16 @@ const ModelSelection = () => {
                     </div>
 
                     <div>
-                        <label htmlFor="category" className="block text-sm font-medium text-gray-700">
-                            Category
+                        <label htmlFor="version" className="block text-sm font-medium text-gray-700">
+                            Version
                         </label>
                         <input
                             type="text"
-                            id="category"
-                            value={formData.category}
-                            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                            id="version"
+                            value={formData.version}
+                            onChange={(e) => setFormData({ ...formData, version: e.target.value })}
                             className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="e.g., Electronics, Software, etc."
+                            placeholder="e.g., 1.0.0, 2.1.3, etc."
                         />
                     </div>
 
@@ -488,6 +536,83 @@ const ModelSelection = () => {
                         </button>
                     </div>
                 </div>
+            </Modal>
+
+            {/* Edit Model Modal */}
+            <Modal
+                isOpen={showEditModal}
+                onClose={() => {
+                    setShowEditModal(false);
+                    setSelectedModel(null);
+                    resetForm();
+                }}
+                title="Edit Model"
+            >
+                <form onSubmit={handleEditSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="edit-name" className="block text-sm font-medium text-gray-700">
+                            Model Name *
+                        </label>
+                        <input
+                            type="text"
+                            id="edit-name"
+                            required
+                            value={formData.name}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Enter model name"
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="edit-description" className="block text-sm font-medium text-gray-700">
+                            Description
+                        </label>
+                        <textarea
+                            id="edit-description"
+                            rows={3}
+                            value={formData.description}
+                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Describe this model..."
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="edit-version" className="block text-sm font-medium text-gray-700">
+                            Version
+                        </label>
+                        <input
+                            type="text"
+                            id="edit-version"
+                            value={formData.version}
+                            onChange={(e) => setFormData({ ...formData, version: e.target.value })}
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="e.g., 1.0.0, 2.1.3, etc."
+                        />
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowEditModal(false);
+                                setSelectedModel(null);
+                                resetForm();
+                            }}
+                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={updateMutation.isLoading}
+                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            {updateMutation.isLoading ? 'Updating...' : 'Update Model'}
+                        </button>
+                    </div>
+                </form>
             </Modal>
         </div>
     );

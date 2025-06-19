@@ -291,7 +291,11 @@ func initializeCPQService(config *AppConfig) (*CPQService, error) {
 		return nil, fmt.Errorf("CPQ service health check failed: %w", err)
 	}
 
-	models := service.ListModels()
+	models, err := service.ListModels()
+	if err != nil {
+		log.Printf("⚠️ Failed to list models: %v", err)
+		models = []*cpq.Model{}
+	}
 	log.Printf("✅ CPQ service initialized with %d models", len(models))
 
 	return service, nil
@@ -539,7 +543,7 @@ func CreateDevelopmentService() (*CPQService, error) {
 		},
 	}
 
-	if err := service.AddModel(devModel); err != nil {
+	if err := service.AddModel(devModel, "system"); err != nil {
 		return nil, fmt.Errorf("failed to add development model: %w", err)
 	}
 
@@ -582,7 +586,7 @@ func CreateTestService() (*CPQService, error) {
 		},
 	}
 
-	if err := service.AddModel(testModel); err != nil {
+	if err := service.AddModel(testModel, "system"); err != nil {
 		return nil, fmt.Errorf("failed to add test model: %w", err)
 	}
 

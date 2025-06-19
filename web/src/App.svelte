@@ -71,13 +71,13 @@
             <div class="demo-models">
                 <h3>Try a demo model:</h3>
                 <div class="demo-links">
-                    <a href="?model=laptop-model-123" class="demo-link">
+                    <a href="?model=sample-laptop" class="demo-link">
                         💻 Laptop Configuration
                     </a>
-                    <a href="?model=server-model-456" class="demo-link">
+                    <a href="?model=sample-server" class="demo-link">
                         🖥️ Server Configuration
                     </a>
-                    <a href="?model=network-model-789" class="demo-link">
+                    <a href="?model=sample-network" class="demo-link">
                         🌐 Network Setup
                     </a>
                 </div>

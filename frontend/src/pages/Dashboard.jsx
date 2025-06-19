@@ -51,8 +51,7 @@ const Dashboard = () => {
       sort_order: 'desc'
     }),
     staleTime: 2 * 60 * 1000,
-    retry: 1,
-    enabled: false // Disable for now if endpoint doesn't exist
+    retry: 1
   });
 
   // Safely extract data arrays - Based on actual API response structure
@@ -69,7 +68,7 @@ const Dashboard = () => {
       return modelsResponse;
     }
 
-    console.warn('Unexpected models response structure:', modelsResponse);
+    // Unexpected response structure
     return [];
   }, [modelsResponse]);
 
@@ -89,7 +88,7 @@ const Dashboard = () => {
       return configurationsResponse;
     }
 
-    console.warn('Unexpected configurations response structure:', configurationsResponse);
+    // Unexpected response structure
     return [];
   }, [configurationsResponse]);
 
@@ -128,7 +127,7 @@ const Dashboard = () => {
         return date.toLocaleDateString();
       }
     } catch (e) {
-      console.error('Date formatting error:', e, 'for date:', dateString);
+      // Date formatting error
       return 'Unknown';
     }
   };
