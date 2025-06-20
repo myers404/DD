@@ -59,7 +59,7 @@
     // For selected options that are now blocked (constraint violation)
     if (status === 'selected' && blockedBy && blockedBy.length > 0) {
       const reasons = blockedBy.map(b => b.message || b.description).join('; ');
-      return { symbol: '❌', title: `Constraint violation: ${reasons}`, class: 'blocked' };
+      return { symbol: '×', title: `Constraint violation: ${reasons}`, class: 'blocked' };
     }
     
     // No marker for selected items that are valid
@@ -70,9 +70,9 @@
     // Switch icon only for same-group alternatives in single-select groups
     if (status === 'switch' && selectionType === 'single') {
       if (impact === 'helps' && helpsResolve && helpsResolve.length > 0) {
-        return { symbol: '🔄', title: `Switch to resolve: ${helpsResolve.join(', ')}`, class: 'switch-helps' };
+        return { symbol: '⟲', title: `Switch to resolve: ${helpsResolve.join(', ')}`, class: 'switch-helps' };
       }
-      return { symbol: '🔄', title: 'Switch selection', class: 'switch' };
+      return { symbol: '⟲', title: 'Switch selection', class: 'switch' };
     }
     
     // Blocked options (cannot be selected due to constraints)
@@ -80,10 +80,13 @@
       const reasons = blockedBy && blockedBy.length > 0 
         ? blockedBy.map(b => b.message || b.description).join('; ')
         : unavailableReason || 'Cannot select due to constraints';
-      return { symbol: '❌', title: reasons, class: 'blocked' };
+      return { symbol: '×', title: reasons, class: 'blocked' };
     }
     
-    // Don't show a marker for options that help - we'll use underline instead
+    // Green arrow for options that help resolve violations
+    if ((status === 'available' || status === 'selectable') && impact === 'helps' && helpsResolve && helpsResolve.length > 0) {
+      return { symbol: '◄', title: `Helps resolve: ${helpsResolve.join(', ')}`, class: 'helps' };
+    }
     
     // No marker for regular selectable options or those that don't impact constraints
     return null;
@@ -119,7 +122,7 @@
           {#if option.base_price && option.base_price > 0}
             <span class="price">(+${option.base_price.toFixed(2)})</span>
           {/if}
-          <span class="requirement-hint">ℹ️</span>
+          <span class="requirement-hint">i</span>
         </Tooltip>
       {:else}
         {option.name}
@@ -226,41 +229,135 @@
   }
   
   .impact-marker {
-    margin-left: 0.5rem;
-    font-size: 0.875rem;
-    cursor: help;
+    /* Sizing */
+    --marker-size: 16px;
+    --marker-font-size: 14px;
+    --marker-border-width: 1.5px;
+    
+    /* Base styles */
     display: inline-block;
+    width: var(--marker-size);
+    height: var(--marker-size);
+    margin-left: 0.5rem;
+    text-align: center;
+    line-height: calc(var(--marker-size) - 2 * var(--marker-border-width) - 1px);
+    font-size: var(--marker-font-size);
+    font-weight: bold;
+    cursor: help;
+    vertical-align: middle;
+    transition: all 0.2s;
+    border-radius: 50%;
+    border: var(--marker-border-width) solid;
   }
   
   .impact-marker.switch {
-    /* Blue switch icon for single-select alternatives */
-    filter: hue-rotate(200deg);
+    /* Blue switch icon */
+    --marker-color: #3b82f6;
+    --marker-bg: transparent;
+    --marker-hover-bg: #3b82f6;
+    --marker-hover-color: white;
+    
+    color: var(--marker-color);
+    background: var(--marker-bg);
+    border-color: var(--marker-color);
+    font-family: sans-serif;
   }
   
   .impact-marker.switch-helps {
-    /* Green switch icon for alternatives that help */
-    filter: hue-rotate(90deg) brightness(1.1);
+    /* Green switch icon when it helps resolve constraints */
+    --marker-color: #10b981;
+    --marker-bg: transparent;
+    --marker-hover-bg: #10b981;
+    --marker-hover-color: white;
+    
+    color: var(--marker-color);
+    background: var(--marker-bg);
+    border-color: var(--marker-color);
+    font-family: sans-serif;
   }
   
   .impact-marker.blocked {
     /* Red X for blocked options */
-    filter: saturate(1.5);
+    --marker-color: #ef4444;
+    --marker-font-size: 18px;
+    
+    color: var(--marker-color);
+    border: none;
+    width: auto;
+    height: auto;
+    line-height: 1;
+    font-family: Arial, sans-serif;
+  }
+  
+  .impact-marker.helps {
+    /* Green arrow for options that help resolve violations */
+    --marker-color: #10b981;
+    --marker-font-size: 14px;
+    
+    color: var(--marker-color);
+    border: none;
+    width: auto;
+    height: auto;
+    line-height: 1;
+    font-family: Arial, sans-serif;
+  }
+  
+  .impact-marker:hover {
+    background: var(--marker-hover-bg);
+    color: var(--marker-hover-color);
+    transform: scale(1.1);
+  }
+  
+  .impact-marker.helps:hover {
+    background: transparent;
+    color: var(--marker-color);
+    opacity: 0.8;
+    transform: scale(1.2);
+  }
+  
+  .impact-marker.blocked:hover {
+    background: transparent;
+    color: var(--marker-color);
+    opacity: 0.8;
+    transform: scale(1.2);
   }
   
   .requirement-hint {
-    margin-left: 0.25rem;
-    font-size: 1rem;
-    color: var(--info-color, #3b82f6);
-    cursor: help;
+    /* Sizing */
+    --info-icon-size: 16px;
+    --info-icon-font-size: 11px;
+    --info-icon-border-width: 2px;
+    
+    /* Colors - easy to override for skinning */
+    --info-icon-color: var(--info-color, #3b82f6);
+    --info-icon-bg: transparent;
+    --info-icon-hover-bg: var(--info-color, #3b82f6);
+    --info-icon-hover-color: white;
+    
+    /* Base styles */
     display: inline-block;
-    line-height: 1;
+    width: var(--info-icon-size);
+    height: var(--info-icon-size);
+    margin-left: 0.25rem;
+    border: var(--info-icon-border-width) solid var(--info-icon-color);
+    border-radius: 50%;
+    text-align: center;
+    line-height: calc(var(--info-icon-size) - 2 * var(--info-icon-border-width));
+    font-size: var(--info-icon-font-size);
+    font-weight: bold;
+    font-style: italic;
+    font-family: Georgia, serif;
+    color: var(--info-icon-color);
+    background: var(--info-icon-bg);
+    cursor: help;
     vertical-align: middle;
-    opacity: 0.8;
-    transition: opacity 0.2s;
+    transition: all 0.2s;
   }
   
   .requirement-hint:hover {
-    opacity: 1;
+    background: var(--info-icon-hover-bg);
+    color: var(--info-icon-hover-color);
+    transform: scale(1.1);
   }
   
   .constraint-reason {
