@@ -10,6 +10,8 @@
         compact = false,
         configuration = null,
         model = null,
+        validationResults = null,
+        constraintSummary = null,
         onEdit = null
     } = $props();
 
@@ -110,6 +112,37 @@
                     </div>
                 {/each}
             </div>
+            
+            <!-- Constraint violations if any -->
+            {#if validationResults && validationResults.violations && validationResults.violations.length > 0}
+                <div class="violations-section">
+                    <h4 class="section-title">⚠️ Configuration Issues ({validationResults.violations.length})</h4>
+                    {#each validationResults.violations as violation}
+                        <div class="violation-item">
+                            <span class="violation-message">{violation.message}</span>
+                            {#if violation.affected_options && violation.affected_options.length > 0}
+                                <span class="affected-options">
+                                    Affects: {violation.affected_options.join(', ')}
+                                </span>
+                            {/if}
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+            
+            <!-- Helpful options if there are violations -->
+            {#if constraintSummary && constraintSummary.helpfulOptions && constraintSummary.helpfulOptions.length > 0}
+                <div class="suggestions-section">
+                    <h4 class="section-title">💡 Suggested Options</h4>
+                    <p class="suggestion-intro">These options can help resolve configuration issues:</p>
+                    {#each constraintSummary.helpfulOptions as helpful}
+                        <div class="suggestion-item">
+                            <span class="suggestion-name">{helpful.name}</span>
+                            <span class="helps-resolve">Resolves: {helpful.helpsResolve.join(', ')}</span>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
             
             <!-- Total -->
             <div class="summary-footer">
@@ -331,6 +364,76 @@
         font-size: 1.25rem;
         font-weight: 700;
         color: var(--primary-color, #3b82f6);
+    }
+    
+    /* Violations section */
+    .violations-section {
+        padding: 1.5rem;
+        background: var(--error-bg, #fef2f2);
+        border-bottom: 1px solid var(--border-color, #e5e7eb);
+    }
+    
+    .violation-item {
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        background: var(--bg-primary, #ffffff);
+        border-radius: 0.375rem;
+        border: 1px solid var(--error-border, #fecaca);
+    }
+    
+    .violation-item:last-child {
+        margin-bottom: 0;
+    }
+    
+    .violation-message {
+        display: block;
+        color: var(--error-text, #991b1b);
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+    }
+    
+    .affected-options {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-secondary, #6b7280);
+    }
+    
+    /* Suggestions section */
+    .suggestions-section {
+        padding: 1.5rem;
+        background: var(--info-bg, #eff6ff);
+        border-bottom: 1px solid var(--border-color, #e5e7eb);
+    }
+    
+    .suggestion-intro {
+        margin: 0 0 0.75rem;
+        font-size: 0.875rem;
+        color: var(--text-secondary, #6b7280);
+    }
+    
+    .suggestion-item {
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        background: var(--bg-primary, #ffffff);
+        border-radius: 0.375rem;
+        border: 1px solid var(--info-border, #bfdbfe);
+    }
+    
+    .suggestion-item:last-child {
+        margin-bottom: 0;
+    }
+    
+    .suggestion-name {
+        display: block;
+        color: var(--info-text, #1e40af);
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+    }
+    
+    .helps-resolve {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-secondary, #6b7280);
     }
     
     @media (max-width: 640px) {

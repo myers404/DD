@@ -53,7 +53,10 @@ func (h *ConfigurationHandlersV2) CreateConfiguration(w http.ResponseWriter, r *
 		return
 	}
 
-	// Return session info
+	// Get current configuration (which includes default selections)
+	config := session.Configurator.GetCurrentConfiguration()
+
+	// Return session info with current configuration
 	response := map[string]interface{}{
 		"session_id":       session.ID,
 		"session_token":    session.SessionToken,
@@ -62,6 +65,11 @@ func (h *ConfigurationHandlersV2) CreateConfiguration(w http.ResponseWriter, r *
 		"status":           session.Status,
 		"expires_at":       session.ExpiresAt,
 		"created_at":       session.CreatedAt,
+		"selections":       config.Selections,
+		"is_valid":         config.IsValid,
+		"total_price":      config.TotalPrice,
+		"validation_state": session.ValidationState,
+		"pricing_state":    session.PricingState,
 	}
 
 	duration := timer()
@@ -170,6 +178,7 @@ func (h *ConfigurationHandlersV2) UpdateConfiguration(w http.ResponseWriter, r *
 		"available_options": result.AvailableOptions,
 		"session_status":    session.Status,
 		"expires_at":        session.ExpiresAt,
+		"is_valid":          result.UpdatedConfig.IsValid,  // Explicitly include is_valid for clarity
 	}
 	
 	WriteSuccessResponse(w, response, meta)

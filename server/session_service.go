@@ -118,8 +118,14 @@ func (s *SessionService) UpdateSessionConfiguration(sessionID string, selections
 	}
 	session.Selections = newSelections
 	
-	// Cache validation and pricing results
-	session.ValidationState = &result.ValidationResult
+	// IMPORTANT: Validate the entire configuration after all selections are applied
+	// Don't use the result from the last AddSelection as it only validates that single addition
+	validationResult := session.Configurator.ValidateCurrentConfiguration()
+	session.ValidationState = &validationResult
+	
+	// Update the result with the correct validation
+	result.ValidationResult = validationResult
+	result.UpdatedConfig = config
 	
 	// Get detailed pricing breakdown
 	priceBreakdown := session.Configurator.GetDetailedPrice()

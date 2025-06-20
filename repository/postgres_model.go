@@ -77,10 +77,10 @@ func (r *PostgresModelRepository) UpdateModel(id string, model *cpq.Model) error
 	// Insert groups
 	for _, group := range model.Groups {
 		_, err = tx.Exec(`
-			INSERT INTO groups (id, model_id, name, description, type, is_required, min_selections, max_selections, display_order, is_active)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO groups (id, model_id, name, description, type, is_required, min_selections, max_selections, display_order, default_option_id, is_active)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		`, group.ID, id, group.Name, group.Description, group.Type,
-			group.IsRequired, group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, group.IsActive)
+			group.IsRequired, group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, nullableString(group.DefaultOptionID), group.IsActive)
 		if err != nil {
 			return fmt.Errorf("failed to insert group %s: %w", group.ID, err)
 		}
@@ -171,10 +171,10 @@ func (r *PostgresModelRepository) DeleteOption(modelID, optionID string) error {
 // AddGroup adds a new group to a model
 func (r *PostgresModelRepository) AddGroup(modelID string, group *cpq.Group) error {
 	_, err := r.db.Exec(`
-		INSERT INTO groups (id, model_id, name, description, type, is_required, min_selections, max_selections, display_order, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO groups (id, model_id, name, description, type, is_required, min_selections, max_selections, display_order, default_option_id, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, group.ID, modelID, group.Name, group.Description, group.Type,
-		group.IsRequired, group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, group.IsActive)
+		group.IsRequired, group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, nullableString(group.DefaultOptionID), group.IsActive)
 	return err
 }
 
@@ -183,10 +183,10 @@ func (r *PostgresModelRepository) UpdateGroup(modelID, groupID string, group *cp
 	_, err := r.db.Exec(`
 		UPDATE groups 
 		SET name = $3, description = $4, type = $5, is_required = $6, 
-		    min_selections = $7, max_selections = $8, display_order = $9, is_active = $10, updated_at = NOW()
+		    min_selections = $7, max_selections = $8, display_order = $9, default_option_id = $10, is_active = $11, updated_at = NOW()
 		WHERE id = $1 AND model_id = $2
 	`, groupID, modelID, group.Name, group.Description, group.Type,
-		group.IsRequired, group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, group.IsActive)
+		group.IsRequired, group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, nullableString(group.DefaultOptionID), group.IsActive)
 	return err
 }
 
@@ -265,10 +265,17 @@ func (r *PostgresModelRepository) DeletePricingRule(modelID, ruleID string) erro
 	return err
 }
 
-// Helper function
+// Helper functions
 func nullableInt(i int) interface{} {
 	if i == 0 {
 		return nil
 	}
 	return i
+}
+
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }

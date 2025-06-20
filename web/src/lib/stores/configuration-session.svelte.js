@@ -60,8 +60,15 @@ class ConfigurationSessionStore {
       await this.createSession();
     }
 
-    // Load model data
+    // Small delay to ensure selections are properly set
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Load model data after session is established
+    // Important: This should not override the selections from createSession
     await this.loadModel();
+    
+    // Force a small delay to ensure UI updates
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
 
   async createSession() {
@@ -72,16 +79,47 @@ class ConfigurationSessionStore {
       
       const result = await this.api.createSession(this.modelId);
       
+      console.log('Create session response:', result);
+      
       this.sessionId = result.session_id;
       this.sessionToken = result.session_token;
       this.sessionStatus = result.status;
       this.expiresAt = result.expires_at;
       this.configuration = result;
       
+      // Update selections from the response (includes default selections)
+      if (result.selections && Array.isArray(result.selections)) {
+        console.log('Applying selections from response:', result.selections);
+        const newSelections = {};
+        for (const sel of result.selections) {
+          // Handle both option_id and OptionID formats (backend might use either)
+          const optionId = sel.option_id || sel.OptionID;
+          const quantity = sel.quantity || sel.Quantity || 1;
+          if (optionId) {
+            newSelections[optionId] = quantity;
+          }
+        }
+        // Ensure we create a new object for reactivity
+        this.selections = { ...newSelections };
+        console.log('Updated this.selections to:', this.selections);
+        console.log('Store selections state after update:', JSON.stringify(this.selections));
+      } else {
+        console.log('No selections in create session response');
+        console.log('Result keys:', Object.keys(result));
+        console.log('Full result:', JSON.stringify(result, null, 2));
+      }
+      
+      // Update validation and pricing state
+      this.validationResult = result.validation_state || null;
+      this.pricingResult = result.pricing_state || null;
+      
       console.log('Session created:', {
         sessionId: this.sessionId,
         status: this.sessionStatus,
-        expiresAt: this.expiresAt
+        expiresAt: this.expiresAt,
+        selections: this.selections,
+        isValid: result.is_valid,
+        totalPrice: result.total_price
       });
       
     } catch (error) {
@@ -103,19 +141,38 @@ class ConfigurationSessionStore {
       const session = await this.api.recoverSession();
       
       if (session) {
+        console.log('Recovering session:', session);
+        
         this.sessionId = session.session_id || session.id;
         this.sessionToken = session.session_token;
         this.sessionStatus = session.status;
         this.expiresAt = session.expires_at;
         this.configuration = session;
-        this.selections = session.selections || {};
+        
+        // Handle selections which might be in array format
+        if (Array.isArray(session.selections)) {
+          const newSelections = {};
+          for (const sel of session.selections) {
+            const optionId = sel.option_id || sel.OptionID;
+            const quantity = sel.quantity || sel.Quantity || 1;
+            if (optionId) {
+              newSelections[optionId] = quantity;
+            }
+          }
+          this.selections = newSelections;
+        } else {
+          // Ensure selections is a new object for reactivity
+          this.selections = { ...(session.selections || {}) };
+        }
+        
         this.validationResult = session.validation_state;
         this.pricingResult = session.pricing_state;
         
         console.log('Session recovered:', {
           sessionId: this.sessionId,
           status: this.sessionStatus,
-          selectionsCount: Object.keys(this.selections).length
+          selectionsCount: Object.keys(this.selections).length,
+          selections: this.selections
         });
         
         return true;
@@ -150,7 +207,19 @@ class ConfigurationSessionStore {
         modelId: this.modelId,
         groupsCount: this.groups.length,
         optionsCount: this.options.length,
-        rulesCount: this.rules.length
+        rulesCount: this.rules.length,
+        groups: this.groups,
+        currentSelections: this.selections,
+        selectionsKeys: Object.keys(this.selections)
+      });
+      
+      // Debug: Check if groups have default_option_id and if they're selected
+      console.log('Groups with defaults:');
+      this.groups.forEach(group => {
+        if (group.default_option_id) {
+          const isSelected = this.selections[group.default_option_id] > 0;
+          console.log(`  - ${group.name}: default = ${group.default_option_id}, selected = ${isSelected}`);
+        }
       });
 
     } catch (error) {
@@ -177,29 +246,38 @@ class ConfigurationSessionStore {
     
     const group = this.groups.find(g => g.id === option.group_id);
     if (!group) return;
+    
+    console.log(`updateSelection called: ${option.name} (${optionId}) = ${newQuantity}, Group: ${group.name}`);
 
-    // For single selection groups, clear other selections in the group
+    // IMPORTANT: We need to handle single-select groups to avoid sending multiple selections
+    // This is required because the backend expects only one selection per single-select group
     const isSingleSelect = group.selection_type === 'single' || 
                           group.selection_type === 'single_required' || 
                           group.selection_type === 'radio' ||
-                          group.selection_type === 'dropdown';
+                          group.selection_type === 'dropdown' ||
+                          group.type === 'single-select' ||
+                          group.type === 'single';
+    
+    // Update the selection - create new object for reactivity
+    const newSelections = { ...this.selections };
     
     if (isSingleSelect && newQuantity > 0) {
       // Clear other selections in the same group
       const groupOptions = this.options.filter(o => o.group_id === group.id);
       groupOptions.forEach(opt => {
-        if (opt.id !== optionId && this.selections[opt.id]) {
-          delete this.selections[opt.id];
+        if (opt.id !== optionId && newSelections[opt.id]) {
+          console.log(`Clearing previous selection: ${opt.name} from group ${group.name}`);
+          delete newSelections[opt.id];
         }
       });
     }
 
-    // Update the selection
     if (newQuantity > 0) {
-      this.selections[optionId] = newQuantity;
+      newSelections[optionId] = newQuantity;
     } else {
-      delete this.selections[optionId];
+      delete newSelections[optionId];
     }
+    this.selections = newSelections;
 
     this.isDirty = true;
 
@@ -225,6 +303,8 @@ class ConfigurationSessionStore {
           quantity: parseInt(quantity) || 1
         }));
 
+      console.log('Sending selections to backend:', formattedSelections);
+
       // Update session with selections
       const result = await this.api.updateSelections(formattedSelections);
 
@@ -234,8 +314,29 @@ class ConfigurationSessionStore {
       this.pricingResult = result.price_breakdown;
       this.availableOptions = Array.isArray(result.available_options) ? result.available_options : [];
       
-      // Check and deselect invalid options
-      this.checkAndDeselectInvalidOptions(this.availableOptions);
+      // IMPORTANT: Sync selections with backend response
+      // The backend handles single-select group logic, so we need to update our local state
+      if (this.configuration && this.configuration.selections) {
+        const backendSelections = {};
+        for (const sel of this.configuration.selections) {
+          backendSelections[sel.option_id] = sel.quantity;
+        }
+        console.log('Syncing selections - Before:', this.selections);
+        console.log('Syncing selections - After:', backendSelections);
+        // Create new object for reactivity
+        this.selections = { ...backendSelections };
+        console.log('Validation result:', this.validationResult);
+        console.log('Available options with impact:', this.availableOptions?.slice(0, 5).map(opt => ({
+          name: opt.option?.name || opt.name,
+          impact: opt.impact,
+          helps: opt.helps_resolve,
+          is_selectable: opt.is_selectable
+        })));
+        this.selections = backendSelections;
+      }
+      
+      // DISABLED: Auto-deselect for testing
+      // this.checkAndDeselectInvalidOptions(this.availableOptions);
 
       this.lastSaved = new Date();
       this.isDirty = false;
@@ -244,7 +345,9 @@ class ConfigurationSessionStore {
         sessionId: this.sessionId,
         selectionsCount: formattedSelections.length,
         isValid: this.validationResult?.is_valid,
-        totalPrice: this.pricingResult?.total_price
+        totalPrice: this.pricingResult?.total_price,
+        fullResult: result,
+        configIsValid: this.configuration?.is_valid
       });
 
     } catch (error) {
@@ -352,7 +455,12 @@ class ConfigurationSessionStore {
   }
 
   get isValid() {
-    return this.validationResult?.is_valid !== false;
+    // Explicitly check the validation result
+    if (this.validationResult && typeof this.validationResult.is_valid === 'boolean') {
+      return this.validationResult.is_valid;
+    }
+    // If no validation result yet, check if we have selections
+    return this.selectedCount === 0;
   }
 
   get violations() {

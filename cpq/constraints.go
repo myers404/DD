@@ -19,12 +19,14 @@ import (
 
 // ConstraintEngine handles static boolean constraint evaluation
 type ConstraintEngine struct {
-	model         *Model
-	mtbdd         *mtbdd.MTBDD
-	compiledRules map[string]mtbdd.NodeRef
-	variables     map[string]mtbdd.NodeRef
-	mutex         sync.RWMutex
-	stats         ConstraintStats
+	model             *Model
+	mtbdd             *mtbdd.MTBDD
+	compiledRules     map[string]mtbdd.NodeRef
+	rulesByID         map[string]*Rule
+	variables         map[string]mtbdd.NodeRef
+	allConstraintsBDD mtbdd.NodeRef
+	mutex             sync.RWMutex
+	stats             ConstraintStats
 }
 
 // ConstraintStats tracks engine performance
@@ -42,10 +44,12 @@ func NewConstraintEngine(model *Model) (*ConstraintEngine, error) {
 	}
 
 	engine := &ConstraintEngine{
-		model:         model,
-		mtbdd:         mtbdd.NewMTBDD(),
-		compiledRules: make(map[string]mtbdd.NodeRef),
-		variables:     make(map[string]mtbdd.NodeRef),
+		model:             model,
+		mtbdd:             mtbdd.NewMTBDD(),
+		compiledRules:     make(map[string]mtbdd.NodeRef),
+		rulesByID:         make(map[string]*Rule),
+		variables:         make(map[string]mtbdd.NodeRef),
+		allConstraintsBDD: mtbdd.NullRef,
 	}
 
 	// Compile all static constraints
@@ -78,12 +82,18 @@ func (ce *ConstraintEngine) compileConstraints() error {
 		}
 
 		ce.compiledRules[rule.ID] = compiledRule
+		// Store rule for quick lookup
+		ruleCopy := rule
+		ce.rulesByID[rule.ID] = &ruleCopy
 	}
 
 	// Step 3: Add group constraints (single/multi select limits)
 	if err := ce.addGroupConstraints(); err != nil {
 		return fmt.Errorf("group constraint generation failed: %w", err)
 	}
+
+	// Step 4: Combine all constraints into a single BDD
+	ce.combineAllConstraints()
 
 	ce.stats.CompilationTime = time.Since(startTime)
 	return nil
@@ -96,7 +106,8 @@ func (ce *ConstraintEngine) declareVariables() error {
 	// Collect all option variables
 	for _, option := range ce.model.Options {
 		if option.IsActive {
-			varName := fmt.Sprintf("opt_%s", option.ID)
+			// Use the option ID directly - it already has the opt_ prefix
+			varName := option.ID
 			varNames = append(varNames, varName)
 		}
 	}
@@ -142,7 +153,7 @@ func (ce *ConstraintEngine) addGroupConstraints() error {
 	return nil
 }
 
-// addSingleSelectConstraint ensures exactly one option selected in group
+// addSingleSelectConstraint ensures at most one (or exactly one if required) option selected in group
 func (ce *ConstraintEngine) addSingleSelectConstraint(group Group) error {
 	options := ce.model.GetOptionsInGroup(group.ID)
 	if len(options) == 0 {
@@ -152,14 +163,17 @@ func (ce *ConstraintEngine) addSingleSelectConstraint(group Group) error {
 	// Build expression: exactly one option selected
 	var optionVars []string
 	for _, opt := range options {
-		optionVars = append(optionVars, fmt.Sprintf("opt_%s", opt.ID))
+		optionVars = append(optionVars, opt.ID)
 	}
 
-	// Generate "exactly one" constraint expression
+	// For select-exactly-one: (A ∨ B ∨ C) ∧ ¬(A ∧ B) ∧ ¬(A ∧ C) ∧ ¬(B ∧ C)
+	// For select-zero-or-one: ¬(A ∧ B) ∧ ¬(A ∧ C) ∧ ¬(B ∧ C)
+	
 	var constraints []string
 
-	// At least one must be selected (if required)
+	// If group is required, at least one must be selected
 	if group.IsRequired {
+		// This makes it "select-exactly-one"
 		constraints = append(constraints, strings.Join(optionVars, " || "))
 	}
 
@@ -194,7 +208,7 @@ func (ce *ConstraintEngine) addMultiSelectConstraint(group Group) error {
 
 	var optionVars []string
 	for _, opt := range options {
-		optionVars = append(optionVars, fmt.Sprintf("opt_%s", opt.ID))
+		optionVars = append(optionVars, opt.ID)
 	}
 
 	// Minimum selections constraint
@@ -228,6 +242,110 @@ func (ce *ConstraintEngine) addMultiSelectConstraint(group Group) error {
 	return nil
 }
 
+// combineAllConstraints combines all compiled rules into a single BDD
+func (ce *ConstraintEngine) combineAllConstraints() {
+	if len(ce.compiledRules) == 0 {
+		ce.allConstraintsBDD = mtbdd.TrueRef
+		return
+	}
+	
+	// Start with true
+	combined := mtbdd.TrueRef
+	
+	// AND all constraints together
+	for _, ruleBDD := range ce.compiledRules {
+		combined = ce.mtbdd.AND(combined, ruleBDD)
+	}
+	
+	ce.allConstraintsBDD = combined
+}
+
+// ===================================================================
+// OPTION IMPACT ANALYSIS
+// ===================================================================
+
+// FindOptionsToResolveViolation finds which unselected options would help resolve a specific rule violation
+// This uses MTBDD Restrict operation for efficient testing
+func (ce *ConstraintEngine) FindOptionsToResolveViolation(ruleID string, currentSelections map[string]bool) []string {
+	ce.mutex.RLock()
+	defer ce.mutex.RUnlock()
+	
+	ruleBDD, exists := ce.compiledRules[ruleID]
+	if !exists {
+		return nil
+	}
+	
+	// Get options involved in this rule
+	support := ce.mtbdd.Support(ruleBDD)
+	
+	var helpfulOptions []string
+	
+	// For each unselected option in the rule
+	for optionID := range support {
+		if currentSelections[optionID] {
+			continue // Already selected
+		}
+		
+		// Use Restrict to test if selecting this option would help
+		testBDD := ce.mtbdd.Restrict(ruleBDD, optionID, true)
+		
+		// Evaluate with current selections
+		result := ce.mtbdd.Evaluate(testBDD, currentSelections)
+		if boolResult, ok := result.(bool); ok && boolResult {
+			// Selecting this option would satisfy the rule
+			helpfulOptions = append(helpfulOptions, optionID)
+		}
+	}
+	
+	return helpfulOptions
+}
+
+// ===================================================================
+// ANALYSIS METHODS
+// ===================================================================
+
+// GetOptionToRulesMapping builds a mapping of options to the rules that involve them
+func (ce *ConstraintEngine) GetOptionToRulesMapping() map[string][]string {
+	ce.mutex.RLock()
+	defer ce.mutex.RUnlock()
+	
+	mapping := make(map[string][]string)
+	
+	// Map each option to rules that involve it
+	for ruleID, ruleBDD := range ce.compiledRules {
+		support := ce.mtbdd.Support(ruleBDD)
+		for varName := range support {
+			// Variable names are option IDs in our system
+			if _, exists := mapping[varName]; !exists {
+				mapping[varName] = []string{}
+			}
+			mapping[varName] = append(mapping[varName], ruleID)
+		}
+	}
+	
+	return mapping
+}
+
+// EvaluateRule evaluates a specific rule with given assignments (thread-safe)
+func (ce *ConstraintEngine) EvaluateRule(ruleID string, assignments map[string]bool) (bool, error) {
+	ce.mutex.RLock()
+	defer ce.mutex.RUnlock()
+	
+	ruleBDD, exists := ce.compiledRules[ruleID]
+	if !exists {
+		return false, fmt.Errorf("rule %s not found", ruleID)
+	}
+	
+	result := ce.mtbdd.Evaluate(ruleBDD, assignments)
+	
+	if boolResult, ok := result.(bool); ok {
+		return boolResult, nil
+	}
+	
+	return false, fmt.Errorf("rule evaluation did not return boolean")
+}
+
+
 // ===================================================================
 // CONSTRAINT EVALUATION METHODS
 // ===================================================================
@@ -237,6 +355,11 @@ func (ce *ConstraintEngine) ValidateSelections(selections []Selection) Validatio
 	startTime := time.Now()
 	ce.mutex.RLock()
 	defer ce.mutex.RUnlock()
+
+	fmt.Printf("Validating %d selections:\n", len(selections))
+	for _, sel := range selections {
+		fmt.Printf("  - %s: %d\n", sel.OptionID, sel.Quantity)
+	}
 
 	// Convert selections to MTBDD variable assignments
 	assignments := ce.selectionsToAssignments(selections)
@@ -274,7 +397,7 @@ func (ce *ConstraintEngine) selectionsToAssignments(selections []Selection) map[
 	// Initialize all option variables to false
 	for _, option := range ce.model.Options {
 		if option.IsActive {
-			varName := fmt.Sprintf("opt_%s", option.ID)
+			varName := option.ID
 			assignments[varName] = false
 		}
 	}
@@ -282,7 +405,7 @@ func (ce *ConstraintEngine) selectionsToAssignments(selections []Selection) map[
 	// Set selected options to true
 	for _, selection := range selections {
 		if selection.Quantity > 0 {
-			varName := fmt.Sprintf("opt_%s", selection.OptionID)
+			varName := selection.OptionID
 			assignments[varName] = true
 		}
 	}
@@ -331,10 +454,13 @@ func (ce *ConstraintEngine) createViolation(ruleID string, selections []Selectio
 				Message:         ce.generateGroupViolationMessage(*group),
 				AffectedOptions: ce.getGroupOptionIDs(groupID),
 			}
+		} else {
+			fmt.Printf("WARNING: Could not find group %s for constraint %s\n", groupID, ruleID)
 		}
 	}
 
 	// Fallback for unknown rules
+	fmt.Printf("WARNING: Unknown rule violation: %s\n", ruleID)
 	return RuleViolation{
 		RuleID:          ruleID,
 		RuleName:        "Unknown Rule",
@@ -356,10 +482,16 @@ func (ce *ConstraintEngine) findAffectedOptions(rule Rule, selections []Selectio
 }
 
 func (ce *ConstraintEngine) extractGroupIDFromRuleID(ruleID string) string {
-	// Extract group ID from rule ID like "group_groupid_constraint_0"
-	parts := strings.Split(ruleID, "_")
-	if len(parts) >= 2 {
-		return parts[1]
+	// Extract group ID from rule ID like "group_grp_processor_constraint_0"
+	// We need to handle group IDs that contain underscores
+	if strings.HasPrefix(ruleID, "group_") && strings.Contains(ruleID, "_constraint_") {
+		// Remove "group_" prefix
+		withoutPrefix := strings.TrimPrefix(ruleID, "group_")
+		// Find the "_constraint_" suffix and extract everything before it
+		constraintIndex := strings.LastIndex(withoutPrefix, "_constraint_")
+		if constraintIndex > 0 {
+			return withoutPrefix[:constraintIndex]
+		}
 	}
 	return ""
 }

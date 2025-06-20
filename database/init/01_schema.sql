@@ -40,6 +40,7 @@ CREATE TABLE groups (
     min_selections INTEGER DEFAULT 0,
     max_selections INTEGER,
     display_order INTEGER DEFAULT 0,
+    default_option_id VARCHAR(100),
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -169,3 +170,7 @@ CREATE TRIGGER update_rules_updated_at BEFORE UPDATE ON rules FOR EACH ROW EXECU
 CREATE TRIGGER update_pricing_rules_updated_at BEFORE UPDATE ON pricing_rules FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_configurations_updated_at BEFORE UPDATE ON configurations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_selections_updated_at BEFORE UPDATE ON selections FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Add foreign key constraint for default_option_id
+ALTER TABLE groups ADD CONSTRAINT fk_default_option 
+    FOREIGN KEY (default_option_id) REFERENCES options(id) ON DELETE SET NULL;

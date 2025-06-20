@@ -153,7 +153,7 @@ func (db *DB) CreateModel(model *cpq.Model, userID string) error {
 	// Insert model
 	_, err = tx.Exec(`
 		INSERT INTO models (id, name, description, version, is_active, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, model.ID, model.Name, model.Description, model.Version, model.IsActive, userID)
 	if err != nil {
 		return fmt.Errorf("failed to insert model: %w", err)
@@ -289,7 +289,7 @@ func (db *DB) AddSelection(configID, optionID string, quantity int) error {
 
 func (db *DB) getModelGroups(modelID string) ([]cpq.Group, error) {
 	rows, err := db.Query(`
-		SELECT id, name, description, type, min_selections, max_selections, display_order, is_active, is_required
+		SELECT id, name, description, type, min_selections, max_selections, display_order, default_option_id, is_active, is_required
 		FROM groups WHERE model_id = $1 ORDER BY display_order
 	`, modelID)
 	if err != nil {
@@ -301,16 +301,20 @@ func (db *DB) getModelGroups(modelID string) ([]cpq.Group, error) {
 	for rows.Next() {
 		group := cpq.Group{}
 		var maxSelections sql.NullInt32
+		var defaultOptionID sql.NullString
 		err := rows.Scan(
 			&group.ID, &group.Name, &group.Description, &group.Type,
 			&group.MinSelections, &maxSelections, &group.DisplayOrder,
-			&group.IsActive, &group.IsRequired,
+			&defaultOptionID, &group.IsActive, &group.IsRequired,
 		)
 		if err != nil {
 			return nil, err
 		}
 		if maxSelections.Valid {
 			group.MaxSelections = int(maxSelections.Int32)
+		}
+		if defaultOptionID.Valid {
+			group.DefaultOptionID = defaultOptionID.String
 		}
 		groups = append(groups, group)
 	}
@@ -449,10 +453,10 @@ func (db *DB) updateConfigurationTotalPrice(configID string) error {
 // Transaction helper methods
 func (db *DB) insertGroup(tx *sql.Tx, modelID string, group cpq.Group) error {
 	_, err := tx.Exec(`
-		INSERT INTO groups (id, model_id, name, description, type, min_selections, max_selections, display_order, is_active, is_required)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO groups (id, model_id, name, description, type, min_selections, max_selections, display_order, default_option_id, is_active, is_required)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, group.ID, modelID, group.Name, group.Description, group.Type,
-		group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, group.IsActive, group.IsRequired)
+		group.MinSelections, nullableInt(group.MaxSelections), group.DisplayOrder, nullableString(group.DefaultOptionID), group.IsActive, group.IsRequired)
 	return err
 }
 

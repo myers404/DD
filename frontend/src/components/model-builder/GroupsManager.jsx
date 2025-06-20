@@ -48,6 +48,16 @@ const GroupsManager = ({ modelId }) => {
     refetchOnWindowFocus: false
   });
 
+  // Fetch all model options for the default option dropdown
+  const {
+    data: allOptions = [],
+  } = useQuery({
+    queryKey: ['model-options', modelId],
+    queryFn: () => cpqApi.getModelOptions(modelId),
+    enabled: !!modelId,
+    refetchOnWindowFocus: false
+  });
+
   // Create group mutation
   const createGroupMutation = useMutation({
     mutationFn: (groupData) => {
@@ -193,17 +203,21 @@ const GroupsManager = ({ modelId }) => {
   };
 
   // Group Form Component
-  const GroupForm = ({ group, onSave, onCancel, isCreating = false }) => {
+  const GroupForm = ({ group, onSave, onCancel, isCreating = false, allOptions = [] }) => {
+    // Debug logging
+    console.log('GroupForm props:', { group, isCreating, allOptions: allOptions.length });
+    
     const [formData, setFormData] = useState({
       name: group?.name || '',
       description: group?.description || '',
-      type: group?.type || 'single_select',
+      type: group?.type || 'single-select',
       is_active: group?.is_active !== false,
       display_order: group?.display_order || 1,
       min_selections: group?.min_selections || 0,
       max_selections: group?.max_selections || 1,
       is_required: group?.is_required || false,
       option_ids: group?.option_ids || [],
+      default_option_id: group?.default_option_id || '',
       ...group
     });
 
@@ -212,7 +226,7 @@ const GroupsManager = ({ modelId }) => {
     const validateGroup = (groupData) => {
       const errors = [];
       if (!groupData.name?.trim()) errors.push('Name is required');
-      if (groupData.type === 'multi_select') {
+      if (groupData.type === 'multi-select' || groupData.type === 'multi_select') {
         if (groupData.min_selections > groupData.max_selections) {
           errors.push('Minimum selections cannot exceed maximum selections');
         }
@@ -234,12 +248,14 @@ const GroupsManager = ({ modelId }) => {
     const handleTypeChange = (newType) => {
       let updates = { type: newType };
 
-      if (newType === 'single_select' || newType === 'optional') {
+      if (newType === 'single-select' || newType === 'optional') {
         updates.min_selections = newType === 'optional' ? 0 : 1;
         updates.max_selections = 1;
-      } else if (newType === 'multi_select') {
+      } else if (newType === 'multi-select') {
         updates.min_selections = 0;
         updates.max_selections = 5;
+        // Clear default option for multi-select groups
+        updates.default_option_id = '';
       }
 
       setFormData({ ...formData, ...updates });
@@ -310,12 +326,42 @@ const GroupsManager = ({ modelId }) => {
                         onChange={(e) => handleTypeChange(e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
-                      <option value="single_select">Single Select</option>
-                      <option value="multi_select">Multi Select</option>
+                      <option value="single-select">Single Select</option>
+                      <option value="multi-select">Multi Select</option>
                       <option value="optional">Optional</option>
                     </select>
                   </div>
                 </div>
+
+                {/* Default Option for Single Select Groups */}
+                {console.log('Default option dropdown check:', { type: formData.type, isCreating, show: (formData.type === 'single_select' || formData.type === 'single-select') && !isCreating })}
+                {(formData.type === 'single_select' || formData.type === 'single-select') && !isCreating && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Default Option
+                      </label>
+                      <select
+                          value={formData.default_option_id || ''}
+                          onChange={(e) => setFormData({...formData, default_option_id: e.target.value})}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">No default</option>
+                        {allOptions
+                            .filter(opt => {
+                              console.log('Option filter check:', { opt, groupId: group?.id || formData.id, matches: opt.group_id === (group?.id || formData.id) });
+                              return opt.group_id === (group?.id || formData.id);
+                            })
+                            .map(opt => (
+                                <option key={opt.id} value={opt.id}>
+                                  {opt.name} {opt.base_price > 0 && `($${opt.base_price})`}
+                                </option>
+                            ))}
+                      </select>
+                      <p className="mt-1 text-sm text-gray-500">
+                        The default option will be automatically selected when creating a new configuration
+                      </p>
+                    </div>
+                )}
 
                 {/* Description */}
                 <div>
@@ -332,7 +378,7 @@ const GroupsManager = ({ modelId }) => {
                 </div>
 
                 {/* Selection Constraints for Multi Select */}
-                {formData.type === 'multi_select' && (
+                {(formData.type === 'multi-select' || formData.type === 'multi_select') && (
                     <div className="bg-blue-50 p-4 rounded-md">
                       <h4 className="text-sm font-medium text-blue-900 mb-3">Selection Constraints</h4>
                       <div className="grid grid-cols-2 gap-4">
@@ -772,6 +818,7 @@ const GroupsManager = ({ modelId }) => {
             {showCreateDialog && (
                 <GroupForm
                     isCreating={true}
+                    allOptions={allOptions}
                     onSave={(data) => createGroupMutation.mutate(data)}
                     onCancel={() => setShowCreateDialog(false)}
                 />
@@ -781,6 +828,7 @@ const GroupsManager = ({ modelId }) => {
                 <GroupForm
                     group={editingGroup}
                     isCreating={false}
+                    allOptions={allOptions}
                     onSave={(data) => updateGroupMutation.mutate({
                       groupId: editingGroup.id,
                       ...data

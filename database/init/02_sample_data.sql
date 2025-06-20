@@ -10,12 +10,12 @@ INSERT INTO users (id, email, password_hash, name, role, is_active) VALUES
 INSERT INTO models (id, name, description, version, category, is_active, created_by) VALUES 
 ('sample-laptop', 'Business Laptop', 'Configurable business laptop for SMB customers', '1.0.0', 'computers', true, '00000000-0000-0000-0000-000000000001');
 
--- Create groups for laptop configuration
-INSERT INTO groups (id, model_id, name, description, type, is_required, min_selections, max_selections, display_order) VALUES 
-('grp_processor', 'sample-laptop', 'Processor', 'Choose your processor', 'single-select', true, 1, 1, 1),
-('grp_memory', 'sample-laptop', 'Memory', 'Choose your RAM configuration', 'single-select', true, 1, 1, 2),
-('grp_storage', 'sample-laptop', 'Storage', 'Choose your storage option', 'single-select', true, 1, 1, 3),
-('grp_accessories', 'sample-laptop', 'Accessories', 'Optional accessories', 'multi-select', false, 0, 5, 4);
+-- Create groups for laptop configuration (without default options initially)
+INSERT INTO groups (id, model_id, name, description, type, is_required, min_selections, max_selections, display_order, default_option_id) VALUES 
+('grp_processor', 'sample-laptop', 'Processor', 'Choose your processor', 'single-select', true, 1, 1, 1, NULL),
+('grp_memory', 'sample-laptop', 'Memory', 'Choose your RAM configuration', 'single-select', true, 1, 1, 2, NULL),
+('grp_storage', 'sample-laptop', 'Storage', 'Choose your storage option', 'single-select', true, 1, 1, 3, NULL),
+('grp_accessories', 'sample-laptop', 'Accessories', 'Optional accessories', 'multi-select', false, 0, 5, 4, NULL);
 
 -- Create processor options
 INSERT INTO options (id, model_id, group_id, name, description, base_price, category, sku, display_order) VALUES 
@@ -66,3 +66,8 @@ INSERT INTO selections (configuration_id, option_id, quantity, unit_price, total
 ('00000000-0000-0000-0000-000000000100', 'opt_ssd_512gb', 1, 200.00, 200.00),
 ('00000000-0000-0000-0000-000000000100', 'opt_mouse', 1, 25.00, 25.00),
 ('00000000-0000-0000-0000-000000000100', 'opt_keyboard', 1, 75.00, 75.00);
+
+-- Update groups with default options after all options are created
+UPDATE groups SET default_option_id = 'opt_cpu_basic' WHERE id = 'grp_processor';
+UPDATE groups SET default_option_id = 'opt_ram_8gb' WHERE id = 'grp_memory';
+UPDATE groups SET default_option_id = 'opt_ssd_256gb' WHERE id = 'grp_storage';

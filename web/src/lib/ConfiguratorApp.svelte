@@ -8,8 +8,6 @@
   import ErrorBoundary from './components/ErrorBoundary.svelte';
   import OptionGroup from './components/OptionGroup.svelte';
   import PricingDisplay from './components/PricingDisplay.svelte';
-  import ValidationDisplay from './components/ValidationDisplay.svelte';
-  import ProgressIndicator from './components/ProgressIndicator.svelte';
   import ConfigurationSummary from './components/ConfigurationSummary.svelte';
   
   let {
@@ -38,6 +36,16 @@
       ? store.groups.filter(g => g.is_active !== false) 
       : []
   );
+  
+  // Check if we have properly loaded the model and selections
+  const isReady = $derived(
+    store.model && 
+    store.groups && 
+    store.options && 
+    store.selections !== null &&
+    store.selections !== undefined &&
+    Object.keys(store.selections).length >= 0  // Force reactivity check
+  );
   const isComplete = $derived(store.isValid && store.selectedCount > 0);
   const sessionInfo = $derived(useSessionApi ? {
     status: store.sessionStatus,
@@ -54,8 +62,22 @@
         model: store.model,
         visibleGroups,
         sessionId: store.sessionId,
+        isValid: store.isValid,
+        validationResult: store.validationResult,
+        selections: store.selections,
+        selectionCount: Object.keys(store.selections || {}).length,
         timestamp: new Date().toISOString()
       });
+      
+      // Debug each group's default option
+      if (store.groups && store.selections) {
+        store.groups.forEach(group => {
+          if (group.default_option_id) {
+            const isSelected = store.selections[group.default_option_id] > 0;
+            console.log(`Group ${group.name}: default=${group.default_option_id}, selected=${isSelected}`);
+          }
+        });
+      }
     }
   });
   
@@ -109,6 +131,27 @@
     }
   }
   
+  function handleClearSession() {
+    // Clear session from local storage
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('session_id');
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('auth_token');
+    }
+    
+    // Reset the store
+    store.reset();
+    
+    // Reinitialize
+    if (useSessionApi) {
+      store.initialize(modelId, {
+        authToken: null
+      });
+    } else {
+      store.setModelId(modelId);
+    }
+  }
+  
   function retry() {
     store.error = null;
     if (useSessionApi) {
@@ -134,7 +177,7 @@
         <p>{store.error.message || 'Something went wrong'}</p>
         <button class="btn-retry" onclick={retry}>Try Again</button>
       </div>
-    {:else if store.isLoading}
+    {:else if store.isLoading || !isReady}
       <div class="loading-state">
         <LoadingSpinner size="large" />
         <p>Loading configuration options...</p>
@@ -146,6 +189,24 @@
       </div>
     {:else}
       <div class="configurator-layout">
+        <!-- Debug Info (temporary) -->
+        {#if window.location.hostname === 'localhost'}
+          <div class="debug-info">
+            <details>
+              <summary>Debug: Store State</summary>
+              <pre>{JSON.stringify({
+                selections: store.selections,
+                selectionCount: store.selectedCount,
+                groupsWithDefaults: store.groups?.filter(g => g.default_option_id).map(g => ({
+                  name: g.name,
+                  defaultOptionId: g.default_option_id,
+                  isSelected: store.selections && store.selections[g.default_option_id] > 0
+                }))
+              }, null, 2)}</pre>
+            </details>
+          </div>
+        {/if}
+        
         <!-- Header -->
         <header class="configurator-header">
           <div class="header-content">
@@ -164,18 +225,21 @@
                   <button class="extend-btn" onclick={handleExtendSession}>Extend</button>
                 {/if}
               {/if}
+              <button class="clear-session-btn" onclick={handleClearSession} title="Clear session and start over">
+                Clear Session
+              </button>
             </div>
           {/if}
           
-          {#if visibleGroups.length > 0}
-            <ProgressIndicator 
-              totalGroups={visibleGroups.length} 
-              completedGroups={visibleGroups.filter(g => {
-                const groupOptions = store.options?.filter(o => o.group_id === g.id) || [];
-                return groupOptions.some(o => store.selections?.[o.id]);
-              }).length}
-            />
+          {#if !sessionInfo && store.configurationId}
+            <div class="session-info">
+              <span class="config-id">Config ID: {store.configurationId}</span>
+              <button class="clear-session-btn" onclick={handleClearSession} title="Clear configuration and start over">
+                Start New Configuration
+              </button>
+            </div>
           {/if}
+          
         </header>
         
         <div class="configurator-body">
@@ -192,7 +256,7 @@
                   options={store.options?.filter(o => 
                     o.group_id === group.id && o.is_active !== false
                   ) || []}
-                  selections={store.selections || {}}
+                  selections={store.selections}
                   availableOptions={store.availableOptions || []}
                   validationResults={useSessionApi ? store.validationResult : store.validationResults}
                   onSelectionChange={(optionId, value) => 
@@ -205,17 +269,19 @@
           
           <!-- Right Column: Constraints, Summary & Pricing -->
           <div class="info-column">
-            <!-- Validation Display -->
-            <div class="info-section">
-              <ValidationDisplay
-                validationResults={useSessionApi ? store.validationResult : store.validationResults}
-                model={store.model}
-              />
-            </div>
-            
             <!-- Summary & Pricing -->
             <div class="info-section">
-              <h3>Selected Items & Pricing</h3>
+              <h3>Configuration Summary</h3>
+              
+              <ConfigurationSummary
+                selections={store.selections || {}}
+                options={store.options || []}
+                groups={store.groups || []}
+                compact={false}
+                configuration={store.configuration}
+                validationResults={useSessionApi ? store.validationResult : store.validationResults}
+                constraintSummary={typeof store.getConstraintSummary === 'function' ? store.getConstraintSummary() : null}
+              />
               
               <PricingDisplay
                 pricing={useSessionApi ? store.pricingResult : store.pricingData}
@@ -242,7 +308,7 @@
                 {#if store.selectedCount > 0}
                   <button 
                     class="btn-secondary"
-                    onclick={() => useSessionApi ? store.reset() : store.clearSelections()}
+                    onclick={() => store.reset()}
                   >
                     Clear All
                   </button>
@@ -384,6 +450,12 @@
     color: var(--text-secondary);
   }
   
+  .config-id {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-family: monospace;
+  }
+  
   .extend-btn {
     padding: 0.25rem 0.75rem;
     background: var(--primary-color);
@@ -396,6 +468,21 @@
   
   .extend-btn:hover {
     background: var(--primary-hover);
+  }
+  
+  .clear-session-btn {
+    padding: 0.25rem 0.75rem;
+    background: var(--error-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    margin-left: auto;
+  }
+  
+  .clear-session-btn:hover {
+    background: #dc2626;
   }
   
   /* Two Column Layout */
@@ -503,6 +590,30 @@
     text-align: center;
   }
   
+  /* Debug Info */
+  .debug-info {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-radius: 4px;
+    padding: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.75rem;
+  }
+  
+  .debug-info summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #92400e;
+  }
+  
+  .debug-info pre {
+    margin: 0.5rem 0 0;
+    padding: 0.5rem;
+    background: white;
+    border-radius: 4px;
+    overflow-x: auto;
+  }
+
   /* Responsive */
   @media (max-width: 1024px) {
     .configurator-body {

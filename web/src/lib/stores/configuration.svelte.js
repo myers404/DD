@@ -255,32 +255,66 @@ class ConfigurationStore {
     const group = this.groups.find(g => g.id === option.group_id);
     if (!group) return;
 
-    // For single selection groups, clear other selections in the group
-    const isSingleSelect = group.selection_type === 'single' || 
-                          group.selection_type === 'single-select' || 
-                          group.type === 'single-select' ||
-                          group.type === 'single';
-    
-    if (isSingleSelect && newQuantity > 0) {
-      const groupOptions = this.options.filter(o => o.group_id === group.id);
-      groupOptions.forEach(opt => {
-        if (opt.id !== optionId && this.selections[opt.id]) {
-          delete this.selections[opt.id];
+    // Check if this is a switch operation based on available options
+    if (newQuantity > 0 && this.availableOptions) {
+      const availableOption = this.availableOptions.find(ao => 
+        (ao.option && ao.option.id === optionId) || ao.id === optionId
+      );
+      
+      if (availableOption) {
+        // Check if this option is blocked
+        if (availableOption.status === 'blocked') {
+          console.warn(`Cannot select blocked option: ${option.name}`);
+          return;
         }
-      });
-    } else if (!isSingleSelect && newQuantity > 0) {
-      // For multi-select groups, check max selections constraint
-      if (group.max_selections) {
-        const currentGroupSelections = this.options
-          .filter(o => o.group_id === group.id && this.selections[o.id] && o.id !== optionId)
-          .length;
         
-        if (currentGroupSelections >= group.max_selections) {
-          console.warn(`Cannot select more than ${group.max_selections} options in group ${group.name}`);
-          return; // Don't allow the selection
+        // Handle switch operation - deselect required options
+        if (availableOption.status === 'switch' && availableOption.requires_deselect && availableOption.requires_deselect.length > 0) {
+          console.log(`Switch operation for ${optionId}:`, availableOption.requires_deselect);
+          for (const deselectId of availableOption.requires_deselect) {
+            if (this.selections[deselectId]) {
+              delete this.selections[deselectId];
+              console.log(`  - Deselected ${deselectId}`);
+            }
+          }
+        }
+        
+        // Check max-reached status
+        if (availableOption.status === 'max-reached') {
+          const groupInfo = availableOption.group_info || {};
+          console.warn(`Cannot select - max selections (${groupInfo.max_selections || 'unknown'}) reached for group ${group.name}`);
+          return;
         }
       }
     }
+
+    // DISABLED: Auto-deselect and max selection constraints for testing
+    // For single selection groups, clear other selections in the group
+    // const isSingleSelect = group.selection_type === 'single' || 
+    //                       group.selection_type === 'single-select' || 
+    //                       group.type === 'single-select' ||
+    //                       group.type === 'single';
+    // 
+    // if (isSingleSelect && newQuantity > 0) {
+    //   const groupOptions = this.options.filter(o => o.group_id === group.id);
+    //   groupOptions.forEach(opt => {
+    //     if (opt.id !== optionId && this.selections[opt.id]) {
+    //       delete this.selections[opt.id];
+    //     }
+    //   });
+    // } else if (!isSingleSelect && newQuantity > 0) {
+    //   // For multi-select groups, check max selections constraint
+    //   if (group.max_selections) {
+    //     const currentGroupSelections = this.options
+    //       .filter(o => o.group_id === group.id && this.selections[o.id] && o.id !== optionId)
+    //       .length;
+    //     
+    //     if (currentGroupSelections >= group.max_selections) {
+    //       console.warn(`Cannot select more than ${group.max_selections} options in group ${group.name}`);
+    //       return; // Don't allow the selection
+    //     }
+    //   }
+    // }
 
     if (newQuantity === 0) {
       delete this.selections[optionId];
@@ -444,7 +478,19 @@ class ConfigurationStore {
       (ao.option && ao.option.id === optionId) || ao.id === optionId
     );
     
-    return availableOption ? availableOption.is_selectable !== false : true;
+    if (!availableOption) return true;
+    
+    // Check new status field first, then legacy is_selectable
+    if (availableOption.status !== undefined) {
+      // Option is available if it's selectable, switch, or already selected
+      // Only blocked and max-reached statuses prevent selection
+      return availableOption.status === 'selectable' || 
+             availableOption.status === 'switch' || 
+             availableOption.status === 'selected';
+    }
+    
+    // Fall back to legacy field
+    return availableOption.is_selectable !== false;
   }
 
   // Get the reason why an option is not available
@@ -457,7 +503,105 @@ class ConfigurationStore {
       (ao.option && ao.option.id === optionId) || ao.id === optionId
     );
     
+    if (!availableOption) return null;
+    
+    // Check new status field first
+    if (availableOption.status === 'blocked' && availableOption.blocked_by && availableOption.blocked_by.length > 0) {
+      return availableOption.blocked_by[0].message || availableOption.blocked_by[0].description;
+    }
+    
+    // Fall back to legacy fields
     return availableOption && !availableOption.is_selectable ? availableOption.reason : null;
+  }
+  
+  // Get detailed constraint information for an option
+  getOptionConstraintInfo(optionId) {
+    if (!this.availableOptions || this.availableOptions.length === 0) {
+      return null;
+    }
+    
+    const availableOption = this.availableOptions.find(ao => 
+      (ao.option && ao.option.id === optionId) || ao.id === optionId
+    );
+    
+    if (!availableOption) return null;
+    
+    return {
+      status: availableOption.status || (availableOption.is_selectable === false ? 'blocked' : 'selectable'),
+      canSelect: availableOption.can_select || availableOption.is_selectable !== false,
+      selectionMethod: availableOption.selection_method || 'add',
+      requiresDeselect: availableOption.requires_deselect || [],
+      blockedBy: availableOption.blocked_by || [],
+      impact: availableOption.impact || null,
+      helpsResolve: availableOption.helps_resolve || [],
+      isRequired: availableOption.is_required || false,
+      groupInfo: availableOption.group_info || null
+    };
+  }
+  
+  // Get constraint summary for current configuration
+  getConstraintSummary() {
+    const summary = {
+      hasViolations: false,
+      blockedOptions: [],
+      switchableOptions: [],
+      helpfulOptions: [],
+      violations: [],
+      totalOptions: this.options.length,
+      availableCount: 0,
+      blockedCount: 0
+    };
+    
+    // Check validation results for violations
+    if (this.validationResults && this.validationResults.violations) {
+      summary.hasViolations = this.validationResults.violations.length > 0;
+      summary.violations = this.validationResults.violations.map(v => ({
+        ruleId: v.rule_id,
+        ruleName: v.rule_name,
+        message: v.message,
+        affectedOptions: v.affected_options || []
+      }));
+    }
+    
+    // Analyze available options
+    if (this.availableOptions && this.availableOptions.length > 0) {
+      for (const availableOption of this.availableOptions) {
+        const option = availableOption.option || availableOption;
+        const optionInfo = {
+          id: option.id,
+          name: option.name,
+          groupId: option.group_id
+        };
+        
+        // Count by status
+        if (availableOption.status === 'blocked') {
+          summary.blockedCount++;
+          summary.blockedOptions.push({
+            ...optionInfo,
+            reasons: availableOption.blocked_by || []
+          });
+        } else if (availableOption.status === 'switch') {
+          summary.switchableOptions.push({
+            ...optionInfo,
+            requiresDeselect: availableOption.requires_deselect || []
+          });
+          summary.availableCount++;
+        } else if (availableOption.status === 'selectable' || availableOption.status === 'selected') {
+          summary.availableCount++;
+        }
+        
+        // Check if option helps resolve violations
+        if (availableOption.impact === 'helps' && availableOption.helps_resolve && availableOption.helps_resolve.length > 0) {
+          summary.helpfulOptions.push({
+            ...optionInfo,
+            helpsResolve: availableOption.helps_resolve,
+            impact: availableOption.impact
+          });
+        }
+      }
+    }
+    
+    return summary;
   }
 
   // Check and deselect options that are no longer valid based on constraints
@@ -469,11 +613,27 @@ class ConfigurationStore {
         const option = availableOption.option || availableOption;
         const optionId = option.id;
         
-        // If option is currently selected but no longer selectable, deselect it
-        if (this.selections[optionId] && availableOption.is_selectable === false) {
+        // Check status field first (new API), then fall back to legacy is_selectable
+        const isBlocked = availableOption.status === 'blocked' || 
+                         (availableOption.status === undefined && availableOption.is_selectable === false);
+        
+        // If option is currently selected but is now blocked, deselect it
+        if (this.selections[optionId] && isBlocked) {
           delete this.selections[optionId];
           anyDeselected = true;
-          console.log(`Auto-deselected invalid option: ${option.name} (${optionId}) - Reason: ${availableOption.reason || 'Constraint violation'}`);
+          
+          // Get detailed reason from blocked_by if available
+          let reasons = [];
+          if (availableOption.blocked_by && availableOption.blocked_by.length > 0) {
+            reasons = availableOption.blocked_by.map(constraint => 
+              constraint.message || constraint.description || constraint.type
+            );
+          } else if (availableOption.reason) {
+            reasons = [availableOption.reason];
+          }
+          
+          const reasonText = reasons.length > 0 ? reasons.join(', ') : 'Constraint violation';
+          console.log(`Auto-deselected blocked option: ${option.name} (${optionId}) - Reason: ${reasonText}`);
         }
       }
     }
@@ -582,6 +742,7 @@ class ConfigurationStore {
   updateVisibleOptions() {
     if (!this.availableOptions || this.availableOptions.length === 0) {
       // If no constraint info, show all options
+      this.hiddenOptions = new Set();
       return;
     }
     
@@ -593,9 +754,13 @@ class ConfigurationStore {
         (ao.option && ao.option.id === option.id) || ao.id === option.id
       );
       
-      if (availableOption && availableOption.is_selectable === false) {
-        // If option is currently selected, disable but don't hide
-        if (!this.selections[option.id]) {
+      if (availableOption) {
+        // Check status field first, then legacy is_selectable
+        const shouldHide = (availableOption.status === 'blocked' || 
+                           (availableOption.status === undefined && availableOption.is_selectable === false)) &&
+                          !this.selections[option.id]; // Don't hide if currently selected
+        
+        if (shouldHide) {
           this.hiddenOptions.add(option.id);
         }
       }
@@ -621,6 +786,7 @@ class ConfigurationStore {
       this.calculatePricing();
     }
   }
+
 
   // Reset store
   reset() {

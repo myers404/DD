@@ -30,6 +30,8 @@ func (s *PostgresSessionStore) CreateSession(modelID, userID string, configurato
 	sessionID := uuid.New().String()
 	sessionToken := generateSessionToken()
 	
+	fmt.Printf("Creating session: ID=%s, ModelID=%s, UserID=%s\n", sessionID, modelID, userID)
+	
 	// Get current configuration
 	config := configurator.GetCurrentConfiguration()
 	
@@ -67,13 +69,20 @@ func (s *PostgresSessionStore) CreateSession(modelID, userID string, configurato
 			user_id, session_token, status, created_at, updated_at, 
 			accessed_at, expires_at, metadata
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)`
 	
-	selectionsJSON, _ := json.Marshal(selections)
-	metadataJSON, _ := json.Marshal(session.Metadata)
+	selectionsJSON, err := json.Marshal(selections)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal selections: %w", err)
+	}
 	
-	_, err := s.db.Exec(query,
+	metadataJSON, err := json.Marshal(session.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	
+	_, err = s.db.Exec(query,
 		session.ID,
 		session.ModelID,
 		session.ModelVersion,
@@ -90,8 +99,11 @@ func (s *PostgresSessionStore) CreateSession(modelID, userID string, configurato
 	)
 	
 	if err != nil {
+		fmt.Printf("ERROR creating session in database: %v\n", err)
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
+	
+	fmt.Printf("Session created successfully in database\n")
 	
 	// Set the configurator on the session
 	session.Configurator = configurator

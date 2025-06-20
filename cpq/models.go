@@ -29,16 +29,17 @@ type Model struct {
 
 // Group defines option groups with selection constraints
 type Group struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	Type          GroupType `json:"type"`
-	MinSelections int       `json:"min_selections"`
-	MaxSelections int       `json:"max_selections"`
-	IsRequired    bool      `json:"is_required"`
-	IsActive      bool      `json:"is_active"`      // Added for frontend compatibility
-	DisplayOrder  int       `json:"display_order"`
-	OptionIDs     []string  `json:"option_ids"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	Type            GroupType `json:"type"`
+	MinSelections   int       `json:"min_selections"`
+	MaxSelections   int       `json:"max_selections"`
+	DefaultOptionID string    `json:"default_option_id,omitempty"`
+	IsRequired      bool      `json:"is_required"`
+	IsActive        bool      `json:"is_active"`      // Added for frontend compatibility
+	DisplayOrder    int       `json:"display_order"`
+	OptionIDs       []string  `json:"option_ids"`
 	Options       []Option  `json:"options,omitempty"` // Added for frontend compatibility
 }
 
@@ -145,8 +146,8 @@ type PriceAdjustment struct {
 type GroupType string
 
 const (
-	SingleSelect GroupType = "single_select" // Choose exactly one
-	MultiSelect  GroupType = "multi_select"  // Choose multiple
+	SingleSelect GroupType = "single-select" // Choose exactly one
+	MultiSelect  GroupType = "multi-select"  // Choose multiple
 	Optional     GroupType = "optional"      // Choose zero or more
 )
 
